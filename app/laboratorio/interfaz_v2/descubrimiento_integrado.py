@@ -90,7 +90,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None):
         raise ValueError('max_brave fuera de rango (1..50)')
     clave = brave.clave_brave()
     if brave_consultar is None and not clave:
-        raise brave.BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY en el entorno o en .env.', 503)
+        raise brave.BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY o BRAVE_SEARCH_API_KEY en el entorno o en .env.', 503)
     periodo = {'desde': desde.isoformat(), 'hasta': hasta.isoformat()}
     propuestas = planificar(marco)
     seleccion = _seleccionar_brave_v5(propuestas, max_brave)

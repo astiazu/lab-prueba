@@ -11,6 +11,15 @@ from app.laboratorio.interfaz_v2.descubrimiento_brave import clave_brave
 
 
 class RunTests(unittest.TestCase):
+    def test_alias_from_dotenv_and_primary_precedence(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            ruta = Path(temporal) / '.env'
+            ruta.write_text('BRAVE_SEARCH_API_KEY=clave-alias-de-prueba\n')
+            with patch.dict(os.environ, {'BRAVE_API_KEY': '', 'BRAVE_SEARCH_API_KEY': ''}), patch.object(configuracion, 'RUTA_ENV', ruta):
+                self.assertEqual(clave_brave(), 'clave-alias-de-prueba')
+                os.environ['BRAVE_API_KEY'] = 'clave-principal-de-prueba'
+                self.assertEqual(clave_brave(), 'clave-principal-de-prueba')
+
     def test_empty_environment_and_bom(self):
         for valor_previo in ('', '   '):
             with self.subTest(vacio=repr(valor_previo)), tempfile.TemporaryDirectory() as temporal:

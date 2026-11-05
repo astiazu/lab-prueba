@@ -13,8 +13,11 @@ def cargar_entorno(ruta=None):
     cargado = load_dotenv(ruta, override=False, encoding="utf-8-sig")
     # dotenv respeta incluso variables vacías. Para Brave, usar el archivo si
     # la variable del proceso existe pero no contiene una clave utilizable.
-    if not (os.environ.get("BRAVE_API_KEY") or "").strip() and ruta.is_file():
-        valor = dotenv_values(ruta, encoding="utf-8-sig").get("BRAVE_API_KEY")
-        if valor and valor.strip():
-            os.environ["BRAVE_API_KEY"] = valor.strip()
+    if ruta.is_file():
+        valores = dotenv_values(ruta, encoding="utf-8-sig")
+        for nombre in ("BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"):
+            if not (os.environ.get(nombre) or "").strip():
+                valor = valores.get(nombre)
+                if valor and valor.strip():
+                    os.environ[nombre] = valor.strip()
     return cargado

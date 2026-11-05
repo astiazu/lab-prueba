@@ -31,11 +31,12 @@ _abrir_url = build_opener(_SinRedireccion()).open
 
 
 def clave_brave():
-    if not (os.environ.get('BRAVE_API_KEY') or '').strip():
+    if not any((os.environ.get(nombre) or '').strip() for nombre in ('BRAVE_API_KEY', 'BRAVE_SEARCH_API_KEY')):
         # También funciona si se invoca la API sin run.py o se crea .env después
         # de arrancar. No sustituye una clave válida ya definida en el proceso.
         cargar_entorno()
-    return (os.environ.get('BRAVE_API_KEY') or '').strip()
+    return ((os.environ.get('BRAVE_API_KEY') or '').strip()
+            or (os.environ.get('BRAVE_SEARCH_API_KEY') or '').strip())
 
 
 def _normalizar_url(url):
@@ -53,7 +54,7 @@ def _normalizar_url(url):
 def _brave(consulta, desde, hasta, clave=None):
     clave = clave if clave is not None else clave_brave()
     if not clave:
-        raise BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY en el entorno o en .env.', 503)
+        raise BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY o BRAVE_SEARCH_API_KEY en el entorno o en .env.', 503)
     parametros = {'q': consulta, 'count': 20, 'freshness': f'{desde}to{hasta}'}
     solicitud = Request(ENDPOINT + '?' + urlencode(parametros), headers={
         'Accept': 'application/json', 'Accept-Encoding': 'identity',

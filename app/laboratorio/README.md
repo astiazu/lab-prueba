@@ -8,7 +8,7 @@ independientemente del directorio de ejecución. Las variables ya definidas en e
 proceso tienen prioridad si no están vacías. Una variable `BRAVE_API_KEY` vacía
 o con espacios se completa desde el archivo. Se aceptan archivos UTF-8 con o sin
 BOM. Si falta la clave, el cliente vuelve a cargar `.env` antes de buscar, incluso
-si el servidor se inició sin `run.py` o el archivo se creó después del arranque. La configuración necesaria es `BRAVE_API_KEY`;
+si el servidor se inició sin `run.py` o el archivo se creó después del arranque. Se acepta `BRAVE_API_KEY` o `BRAVE_SEARCH_API_KEY` (el primero tiene prioridad);
 `.env.example` documenta su nombre sin contener credenciales. `.env` y sus variantes
 locales están excluidos de Git. Nunca incluir claves en commits o logs.
 
@@ -47,7 +47,7 @@ la API ni necesitar claves reales.
 ## Si aparece «Falta BRAVE_API_KEY»
 
 El archivo debe llamarse exactamente `.env` (no `.env.txt`) y estar en la misma
-carpeta que `run.py`. La entrada debe llamarse exactamente `BRAVE_API_KEY`.
+carpeta que `run.py`. La entrada puede llamarse `BRAVE_API_KEY` o `BRAVE_SEARCH_API_KEY`.
 El archivo local de otra máquina no se transfiere automáticamente al servidor
 ni a este entorno en la nube; se debe configurar en la máquina que ejecuta Python.
 No compartir el contenido del archivo ni la clave por chat. Si se reemplaza una
