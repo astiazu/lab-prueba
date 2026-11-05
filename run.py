@@ -3,13 +3,13 @@
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from dotenv import load_dotenv
+from app.laboratorio.configuracion import cargar_entorno
 
 from servidor.api import ManejadorHTTP
 
 
 def main():
-    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+    cargar_entorno(Path(__file__).resolve().parent / ".env")
     servidor = ThreadingHTTPServer(("127.0.0.1", 8765), ManejadorHTTP)
     print("Laboratorio EMM disponible en http://127.0.0.1:8765", flush=True)
     try:

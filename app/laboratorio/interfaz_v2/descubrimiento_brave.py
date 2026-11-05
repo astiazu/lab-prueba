@@ -6,6 +6,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from app.laboratorio.configuracion import cargar_entorno
+
 ENDPOINT = 'https://api.search.brave.com/res/v1/web/search'
 TIMEOUT = 15
 MAX_BYTES = 4 * 1024 * 1024
@@ -29,6 +31,10 @@ _abrir_url = build_opener(_SinRedireccion()).open
 
 
 def clave_brave():
+    if not (os.environ.get('BRAVE_API_KEY') or '').strip():
+        # También funciona si se invoca la API sin run.py o se crea .env después
+        # de arrancar. No sustituye una clave válida ya definida en el proceso.
+        cargar_entorno()
     return (os.environ.get('BRAVE_API_KEY') or '').strip()
 
 

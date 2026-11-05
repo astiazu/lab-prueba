@@ -103,7 +103,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(datos['error']['codigo'], 'motor_no_disponible')
 
     def test_missing_key_is_json(self):
-        with patch.dict(os.environ, {'BRAVE_API_KEY': ''}):
+        with patch.dict(os.environ, {'BRAVE_API_KEY': ''}), patch.object(motor.brave, 'cargar_entorno'):
             estado, datos = self.post({'marco': 'a;b;c', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}})
         self.assertEqual(estado, 503)
         self.assertEqual(datos['error']['codigo'], 'brave_no_configurado')

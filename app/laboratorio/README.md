@@ -5,7 +5,10 @@ Iniciar con `python3 run.py` (puerto 8765).
 
 Al iniciar, `python-dotenv` carga el archivo `.env` ubicado junto a `run.py`,
 independientemente del directorio de ejecución. Las variables ya definidas en el
-proceso tienen prioridad. La configuración necesaria es `BRAVE_API_KEY`;
+proceso tienen prioridad si no están vacías. Una variable `BRAVE_API_KEY` vacía
+o con espacios se completa desde el archivo. Se aceptan archivos UTF-8 con o sin
+BOM. Si falta la clave, el cliente vuelve a cargar `.env` antes de buscar, incluso
+si el servidor se inició sin `run.py` o el archivo se creó después del arranque. La configuración necesaria es `BRAVE_API_KEY`;
 `.env.example` documenta su nombre sin contener credenciales. `.env` y sus variantes
 locales están excluidos de Git. Nunca incluir claves en commits o logs.
 
@@ -40,3 +43,12 @@ configuración incluye ese dominio; su publicación es independiente del push de
 Pruebas: `python3 -m unittest discover -s tests -v` y
 `node tests/test_busqueda.cjs`. Los tests usan respuestas controladas sin consumir
 la API ni necesitar claves reales.
+
+## Si aparece «Falta BRAVE_API_KEY»
+
+El archivo debe llamarse exactamente `.env` (no `.env.txt`) y estar en la misma
+carpeta que `run.py`. La entrada debe llamarse exactamente `BRAVE_API_KEY`.
+El archivo local de otra máquina no se transfiere automáticamente al servidor
+ni a este entorno en la nube; se debe configurar en la máquina que ejecuta Python.
+No compartir el contenido del archivo ni la clave por chat. Si se reemplaza una
+clave ya cargada y no vacía, reiniciar el servidor para aplicar la nueva.

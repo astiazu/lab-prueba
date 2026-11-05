@@ -6,9 +6,27 @@ import unittest
 from unittest.mock import patch
 
 import run
+from app.laboratorio import configuracion
+from app.laboratorio.interfaz_v2.descubrimiento_brave import clave_brave
 
 
 class RunTests(unittest.TestCase):
+    def test_empty_environment_and_bom(self):
+        for valor_previo in ('', '   '):
+            with self.subTest(vacio=repr(valor_previo)), tempfile.TemporaryDirectory() as temporal:
+                ruta = Path(temporal) / '.env'
+                ruta.write_text('BRAVE_API_KEY=clave-local-de-prueba\n', encoding='utf-8-sig')
+                with patch.dict(os.environ, {'BRAVE_API_KEY': valor_previo}), patch.object(configuracion, 'RUTA_ENV', ruta):
+                    self.assertEqual(clave_brave(), 'clave-local-de-prueba')
+
+    def test_file_created_after_startup(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            ruta = Path(temporal) / '.env'
+            with patch.dict(os.environ, {'BRAVE_API_KEY': ''}), patch.object(configuracion, 'RUTA_ENV', ruta):
+                self.assertEqual(clave_brave(), '')
+                ruta.write_text('BRAVE_API_KEY=clave-local-de-prueba\n')
+                self.assertEqual(clave_brave(), 'clave-local-de-prueba')
+
     def test_dotenv_path_and_existing_environment(self):
         for valor_previo, esperado in (('', 'clave-local-de-prueba'), ('clave-del-proceso', 'clave-del-proceso')):
             with self.subTest(valor_previo=bool(valor_previo)), tempfile.TemporaryDirectory() as temporal:

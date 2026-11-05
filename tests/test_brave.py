@@ -27,7 +27,7 @@ class BraveTests(unittest.TestCase):
         self.assertEqual(abrir.call_args.kwargs['timeout'], 15)
 
     def test_missing_key_does_not_connect(self):
-        with patch.dict(os.environ, {'BRAVE_API_KEY': ''}), patch.object(brave, '_abrir_url') as abrir:
+        with patch.dict(os.environ, {'BRAVE_API_KEY': ''}), patch.object(brave, 'cargar_entorno'), patch.object(brave, '_abrir_url') as abrir:
             with self.assertRaises(brave.BraveError) as error:
                 brave._brave('consulta', '2025-01-01', '2025-12-31')
             self.assertEqual(error.exception.codigo, 'brave_no_configurado')
