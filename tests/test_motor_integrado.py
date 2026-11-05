@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from app.laboratorio.interfaz_v2 import descubrimiento_integrado as motor
 from app.laboratorio.motor_v2.contratos import Marco
+from app.laboratorio.interfaz_v2.stubs import resultados_web
 
 
 class MotorTests(unittest.TestCase):
@@ -16,7 +17,7 @@ class MotorTests(unittest.TestCase):
                    'id_ejecucion_documental': 'prueba'}
         with tempfile.TemporaryDirectory() as temporal:
             destino = Path(temporal) / 'datos' / 'ejecuciones' / 'stub'
-            with patch.object(motor, 'DESTINO', destino), patch('socket.socket', side_effect=AssertionError('No debe haber red')):
+            with patch.object(motor, 'DESTINO', destino), patch('socket.socket', side_effect=AssertionError('No debe haber red')), patch.object(motor.ddg, 'consultar', side_effect=lambda q, cursor=None, con_diagnostico=False: (resultados_web(q), None, {'estado': 'OK', 'solicitudes_http': 0})):
                 primero = motor.ejecutar_busqueda(payload)
                 snapshots = list(destino.glob('busqueda_integrada_*.json'))
                 self.assertEqual(len(snapshots), 1)

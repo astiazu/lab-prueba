@@ -46,13 +46,13 @@
 
     function mostrar(datos) {
         panel.replaceChildren();
-        texto(panel, "h2", "Resultados de prueba");
+        texto(panel, "h2", "Resultados de descubrimiento");
         texto(panel, "p", datos.advertencia);
         texto(panel, "p", `Período: ${datos.periodo.desde} a ${datos.periodo.hasta}`);
         const kpis = document.createElement("div");
         kpis.className = "kpis";
         texto(kpis, "article", `URLs únicas: ${datos.total_urls_unicas}`);
-        texto(kpis, "article", `${datos.simulado ? "Operaciones locales exitosas" : "Solicitudes exitosas"}: ${datos.solicitudes_exitosas}`);
+        texto(kpis, "article", `${datos.simulado ? "Operaciones exitosas (modo mixto/prueba)" : "Solicitudes exitosas"}: ${datos.solicitudes_exitosas}`);
         panel.append(kpis);
         const origenes = Array.isArray(datos.origenes)
             ? datos.origenes.join(", ")
@@ -67,14 +67,14 @@
             texto(articulo, "h3", publicacion.titulo);
             texto(articulo, "p", `${publicacion.origen} · ${publicacion.fecha || publicacion.fecha_indice || publicacion.youtube?.publicado_en || "Fecha no disponible"}`);
             texto(articulo, "p", publicacion.resumen || publicacion.descripcion || "Sin descripción");
-            if (datos.simulado) {
+            if (publicacion.simulado ?? datos.simulado) {
                 texto(articulo, "p", "URL ficticia (sin navegación): " + publicacion.url);
                 panel.append(articulo);
                 continue;
             }
             const url = new URL(publicacion.url);
             if (["https:", "http:"].includes(url.protocol)) {
-                const enlace = texto(articulo, "a", "Enlace de ejemplo");
+                const enlace = texto(articulo, "a", "Ver publicación");
                 enlace.href = url.href;
                 enlace.target = "_blank";
                 enlace.rel = "noopener noreferrer";

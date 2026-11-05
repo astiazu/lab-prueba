@@ -20,6 +20,9 @@ class ApiTests(unittest.TestCase):
         cls.temporal = tempfile.TemporaryDirectory()
         cls.destino = patch.object(motor, 'DESTINO', Path(cls.temporal.name) / 'datos' / 'ejecuciones' / 'stub')
         cls.destino.start()
+        from app.laboratorio.interfaz_v2.stubs import resultados_web
+        cls.ddg = patch.object(motor.ddg, 'consultar', side_effect=lambda q, cursor=None, con_diagnostico=False: (resultados_web(q), None, {'estado': 'OK', 'solicitudes_http': 0}) if con_diagnostico else (resultados_web(q), None))
+        cls.ddg.start()
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), ManejadorHTTP)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -29,6 +32,7 @@ class ApiTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join()
+        cls.ddg.stop()
         cls.destino.stop()
         cls.temporal.cleanup()
 
@@ -53,7 +57,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(datos['solicitudes_externas'], 0)
         self.assertTrue(datos['simulado'])
         self.assertTrue(Path(motor.DESTINO).is_dir())
-        self.assertIn('DEMO', datos['advertencia'])
+        self.assertIn('MIXTO', datos['advertencia'])
         for publicacion in datos['publicaciones']:
             self.assertIn('[SIMULADO]', publicacion['titulo'])
             self.assertTrue(publicacion['proveedores'])

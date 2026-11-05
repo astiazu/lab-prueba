@@ -18,8 +18,8 @@ from app.laboratorio.interfaz_v2 import descubrimiento_redes as redes
 from app.laboratorio.motor_v2.recuperacion_documental_enriquecida import enriquecer, fuente_url
 from app.laboratorio.motor_v2.recuperador_documental import descargar_html
 
-# Separar los resultados de prueba de futuros snapshots con proveedores reales.
-DESTINO = Path(__file__).resolve().parents[3] / 'datos' / 'ejecuciones' / 'descubrimiento_v2_stub'
+# Aislar este modo mixto de los snapshots anteriores totalmente simulados.
+DESTINO = Path(__file__).resolve().parents[3] / 'datos' / 'ejecuciones' / 'descubrimiento_v2_ddg'
 REDES = ('facebook.com', 'instagram.com', 'youtube.com', 'x.com', 'twitter.com')
 
 def planificar(marco):
@@ -211,6 +211,8 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, ddg_consultar=None, yout
                 if ddg_consultar is None:
                     resultados, siguiente, diagnostico = ddg.consultar(q, cursor, con_diagnostico=True)
                     diagnosticos_ddg.append({'consulta': q, 'pagina': pagina, **diagnostico})
+                    if diagnostico.get('estado') not in ('OK', 'SIN_RESULTADOS'):
+                        raise ddg.DDGRespuestaInvalida(diagnostico.get('estado', 'ERROR_EXTRACCION'), diagnostico)
                 else:
                     respuesta = ddg_fn(q, cursor)
                     resultados, siguiente = respuesta[:2]
@@ -232,14 +234,15 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, ddg_consultar=None, yout
                 pagina += 1
             except ddg.DDGRespuestaInvalida as exc:
                 estado_ddg = exc.estado
-                diagnosticos_ddg.append({'consulta': q, 'pagina': pagina, **exc.diagnostico, 'estado': exc.estado})
+                if not diagnosticos_ddg or diagnosticos_ddg[-1].get('consulta') != q or diagnosticos_ddg[-1].get('pagina') != pagina:
+                    diagnosticos_ddg.append({'consulta': q, 'pagina': pagina, **exc.diagnostico, 'estado': exc.estado})
                 ddg_consulta_incompleta = q
                 if exc.estado == 'LIMITADO':
                     avisos.append(f'DDG LIMITADO: se detuvo el proveedor en {q[:80]}; no se presume agotamiento ni se reintenta')
                     # V5: no malgastar resto del presupuesto DDG
                     pendientes_ddg.clear()
                 else:
-                    avisos.append(f'DDG {exc.estado}: error extracción')
+                    avisos.append(f'DDG {exc.estado}: {exc.diagnostico.get("aviso", "no se pudo completar la consulta")}')
                 detener_ddg = True
                 break
             except Exception as exc:
@@ -427,9 +430,9 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, ddg_consultar=None, yout
     origenes_sociales = {k:v for k,v in origenes_counter.items() if any(k == r or (k or '').endswith('.' + r) for r in REDES)}
 
     resultado = {
-        'modo': 'MOTOR_REAL_CON_STUBS_LOCALES',
+        'modo': 'DDG_REAL_CON_OTROS_PROVEEDORES_SIMULADOS',
         'simulado': True,
-        'solicitudes_externas': 0,
+        'solicitudes_externas': sum(d.get('solicitudes_http', 0) for d in diagnosticos_ddg),
         'version': 'LAB_DISCOVERY_V11_META_ULTIMA_INTERVENCION',
         'nueva_busqueda': True,
         'fecha_ejecucion_utc': ahora.isoformat(),
@@ -469,7 +472,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, ddg_consultar=None, yout
         'origenes_sociales': origenes_sociales,
         'total_social_links': sum(origenes_sociales.values()),
         'errores': errores,
-        'avisos': avisos + ['Brave, DDG, YouTube, redes y recuperación documental usan sustitutos locales; no se consultó Internet.'],
+        'avisos': avisos + ['DuckDuckGo usa HTTP real; Brave, YouTube, redes y recuperación documental siguen siendo simulados.'],
         'estado_ddg': estado_ddg,
         'diagnosticos_ddg': diagnosticos_ddg,
         'publicaciones': list(urls.values()),
@@ -481,8 +484,11 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, ddg_consultar=None, yout
                         'videos_actualizados':len(ids_actualizados), 'solicitudes_videos_estimadas':youtube_detalles_intentos,
                         'cuota_search_estimada':youtube_intentos*100},
         'lecturas_youtube':lecturas_youtube,
-        'advertencia': 'MODO DEMO: orquestador integrado con dependencias locales de prueba. Todas las publicaciones y métricas son ficticias; no constituyen evidencia EMM.'
+        'advertencia': 'MODO MIXTO: DuckDuckGo real; otros proveedores y recuperación documental simulados. Los candidatos no constituyen evidencia EMM acreditada.'
     }
+
+    for doc in resultado['publicaciones']:
+        doc['simulado'] = 'DUCKDUCKGO_HTML' not in doc.get('proveedores', [])
 
     # L4.9.2.9: segunda pasada de documentos, sin decidir EMM ni alterar candidatos.
     # Solo HTML público para WEB; YouTube usa detalles nativos ya obtenidos.

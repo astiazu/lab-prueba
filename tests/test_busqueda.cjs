@@ -42,10 +42,14 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     assert.equal(peticion.url, '/api/buscar');
     assert.deepEqual(JSON.parse(peticion.opciones.body), { marco: 'a;b;c', periodo: respuesta.periodo });
     const panel = elementos.form.siguiente;
-    assert.equal(panel.children[0].textContent, 'Resultados de prueba');
+    assert.equal(panel.children[0].textContent, 'Resultados de descubrimiento');
     assert.equal(panel.children.at(-1).children[2].textContent, '<script>texto</script>');
     assert.equal(panel.children[4].textContent, 'Orígenes: example.com: 1');
     assert.ok(panel.children.at(-1).children[3].textContent.startsWith('URL ficticia'));
+    respuesta.publicaciones[0].simulado = false;
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.equal(panel.children.at(-1).children[3].textContent, 'Ver publicación');
+    assert.equal(panel.children.at(-1).children[3].href, 'https://example.com/demo');
     elementos.marco.events.input();
     assert.equal(boton.disabled, true);
     assert.equal(panel.children.length, 0);
