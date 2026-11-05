@@ -9,7 +9,7 @@ from app.laboratorio.interfaz_v2 import descubrimiento_integrado as motor
 from app.laboratorio.motor_v2.contratos import Marco
 
 PAYLOAD = {'marco': 'Entidad libre; Contexto; Territorio',
-           'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}, 'max_brave': 2}
+           'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}, 'max_brave': 2, 'max_documentos_enriquecer': 0}
 RESPUESTA = {'web': {'results': [{'url': 'https://example.org/nota#fragmento', 'title': 'Nota', 'description': 'Texto'}]}}
 
 
@@ -28,14 +28,15 @@ class MotorTests(unittest.TestCase):
                 self.assertEqual(segundo['historico']['urls_heredadas'], 1)
                 self.assertEqual(primero['total_urls_unicas'], 1)
                 self.assertEqual(primero['errores'], [])
-                self.assertEqual(primero['solicitudes_por_proveedor'], {'BRAVE_WEB': 2})
+                self.assertEqual(primero['solicitudes_por_proveedor'], {'BRAVE_WEB': 2, 'RECUPERACION_DOCUMENTAL': 0})
                 self.assertEqual(proveedor.call_count, 4)
                 publicacion = primero['publicaciones'][0]
                 self.assertEqual(publicacion['proveedores'], ['BRAVE_WEB'])
                 self.assertEqual(len(publicacion['consultas_origen']), 2)
                 self.assertFalse(publicacion['simulado'])
                 self.assertEqual(len(json.loads(contenido)['publicaciones']), 1)
-                self.assertNotIn('recuperacion_documental', primero)
+                self.assertEqual(primero['recuperacion_documental']['pendientes'], 1)
+                self.assertEqual(publicacion['evaluacion_contextual']['score_emm'], 0.0)
 
     def test_error_stops_provider_without_retry(self):
         proveedor = Mock(side_effect=motor.brave.BraveError('brave_limite', 'Límite alcanzado', 429))

@@ -26,6 +26,9 @@ class ApiTests(unittest.TestCase):
         cls.proveedor = patch.object(motor.brave, '_brave', return_value={'web': {'results': [
             {'url': 'https://example.org/nota', 'title': 'Nota de prueba', 'description': 'Descripción de prueba'}]}})
         cls.proveedor.start()
+        from app.laboratorio.motor_v2 import recuperacion_documental_enriquecida as recuperacion
+        cls.html = patch.object(recuperacion, 'descargar_html', return_value='<body>Entidad libre Contexto libre Territorio libre</body>')
+        cls.html.start()
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), ManejadorHTTP)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -35,6 +38,7 @@ class ApiTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join()
+        cls.html.stop()
         cls.proveedor.stop()
         cls.entorno.stop()
         cls.destino.stop()
@@ -65,7 +69,8 @@ class ApiTests(unittest.TestCase):
         for publicacion in datos['publicaciones']:
             self.assertFalse(publicacion['simulado'])
             self.assertTrue(publicacion['proveedores'])
-        self.assertNotIn('recuperacion_documental', datos)
+        self.assertEqual(datos['recuperacion_documental']['documentos_con_texto'], 1)
+        self.assertEqual(datos['publicaciones'][0]['evaluacion_contextual']['score_emm'], 1.0)
 
     def test_invalid_input(self):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}

@@ -1,6 +1,4 @@
-"""Sustituto local de recuperación: nunca descarga documentos de Internet."""
-from app.laboratorio.interfaz_v2.stubs import obtener_html
+"""Ruta compatible para el recuperador HTTP real."""
+from app.laboratorio.motor_v2.recuperacion_documental_enriquecida import descargar_html
 
-
-def descargar_html(url):
-    return obtener_html(url)
+__all__ = ['descargar_html']

@@ -50,6 +50,12 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     await elementos.form.events.submit({ preventDefault() {} });
     assert.equal(panel.children.at(-1).children[3].textContent, 'Ver publicación');
     assert.equal(panel.children.at(-1).children[3].href, 'https://example.com/demo');
+    respuesta.publicaciones[0].evaluacion_contextual = { score_emm: 0.6, justificacion: 'Encontrado: entidad y contexto. Falta: territorio.' };
+    respuesta.publicaciones[0].recuperacion = { estado: 'RECUPERADO' };
+    respuesta.publicaciones[0].cuerpo_extraido = '<script>contenido como texto</script>';
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.equal(panel.children.at(-1).children[4].textContent, 'Score EMM: 0.6');
+    assert.equal(panel.children.at(-1).children.at(-1).children[1].textContent, '<script>contenido como texto</script>');
     elementos.marco.events.input();
     assert.equal(boton.disabled, true);
     assert.equal(panel.children.length, 0);

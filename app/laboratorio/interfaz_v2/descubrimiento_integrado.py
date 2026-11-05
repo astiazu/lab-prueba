@@ -7,6 +7,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from app.laboratorio.motor_v2.contratos import Marco
+from app.laboratorio.motor_v2.recuperacion_documental_enriquecida import enriquecer
+from app.laboratorio.motor_v2.evaluador_contextual import evaluar_publicacion
 from app.laboratorio.interfaz_v2 import descubrimiento_brave as brave
 
 # No heredar datos simulados o de proveedores anteriores.
@@ -68,8 +70,8 @@ def _seleccionar_brave_v5(propuestas, limite):
     return (web + redes_equilibradas)[:limite]
 
 
-def ejecutar_busqueda(payload, *, brave_consultar=None):
-    """Planificar y consolidar Brave; no invoca otros buscadores ni recuperadores."""
+def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=None):
+    """Descubrir con Brave, recuperar HTML y evaluar sin descartar candidatos."""
     if not isinstance(payload, dict):
         raise ValueError('El payload debe ser un objeto JSON')
     texto = payload.get('marco')
@@ -88,6 +90,9 @@ def ejecutar_busqueda(payload, *, brave_consultar=None):
     max_brave = payload.get('max_brave', 50)
     if type(max_brave) is not int or not 1 <= max_brave <= 50:
         raise ValueError('max_brave fuera de rango (1..50)')
+    max_documentos = payload.get('max_documentos_enriquecer', 8)
+    if type(max_documentos) is not int or not 0 <= max_documentos <= 100:
+        raise ValueError('max_documentos_enriquecer fuera de rango (0..100)')
     clave = brave.clave_brave()
     if brave_consultar is None and not clave:
         raise brave.BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY o BRAVE_SEARCH_API_KEY en el entorno o en .env.', 503)
@@ -144,19 +149,34 @@ def ejecutar_busqueda(payload, *, brave_consultar=None):
     avisos = ['Se consulta solo la primera página de cada consulta (hasta 20 resultados). No se presume cobertura exhaustiva.']
     if errores:
         avisos.append('La búsqueda de Brave se detuvo por un error; se conservaron los resultados disponibles.')
+    recuperacion = enriquecer(list(urls.values()), obtener_html=documental_obtener_html,
+                             max_solicitudes=max_documentos)
+    publicaciones = recuperacion.pop('publicaciones')
+    for publicacion in publicaciones:
+        publicacion['evaluacion_contextual'] = evaluar_publicacion(marco, publicacion)
+        if publicacion['recuperacion']['estado'] == 'ERROR':
+            error = publicacion['recuperacion']['error']
+            errores.append({'proveedor': 'RECUPERACION_DOCUMENTAL', 'url': publicacion['url'],
+                            'codigo': error['codigo'], 'error': error['mensaje']})
+    if recuperacion['pendientes']:
+        avisos.append('Hay documentos pendientes por presupuesto de recuperación; se evaluaron con título y descripción.')
+    if any(p['recuperacion']['estado'] in ('ERROR', 'SIN_TEXTO') for p in publicaciones):
+        avisos.append('Algunos documentos no aportaron cuerpo; su evaluación usa los textos disponibles.')
     resultado = {
         'modo': 'BRAVE_SEARCH_REAL', 'simulado': False, 'proveedor': 'BRAVE_WEB',
-        'version': 'LAB_BRAVE_ONLY_V1', 'nueva_busqueda': True,
+        'version': 'LAB_BRAVE_RECUPERACION_EMM_V1', 'nueva_busqueda': True,
         'fecha_ejecucion_utc': ahora.isoformat(), 'marco': texto, 'periodo': periodo,
         'solicitudes_exitosas': exitosas, 'solicitudes_intentadas': intentadas,
-        'solicitudes_externas': intentadas, 'solicitudes_por_proveedor': {'BRAVE_WEB': intentadas},
+        'solicitudes_externas': intentadas + recuperacion['solicitudes_intentadas'],
+        'solicitudes_por_proveedor': {'BRAVE_WEB': intentadas, 'RECUPERACION_DOCUMENTAL': recuperacion['solicitudes_intentadas']},
         'consultas_planificadas': len(propuestas), 'consultas_unicas_planificadas': len(propuestas),
         'consultas_ejecutadas': registros, 'consultas_pendientes': pendientes,
         'pendientes_por_proveedor': {'BRAVE_WEB': pendientes},
         'cobertura_parcial': True,
         'total_urls_unicas': len(urls), 'origenes': dict(Counter(d['origen'] for d in urls.values())),
-        'publicaciones': list(urls.values()), 'errores': errores, 'avisos': avisos,
-        'advertencia': 'Resultados de Brave Search, sin acreditación EMM. La fecha de índice no acredita la fecha de publicación. No se descargó el contenido de los enlaces.',
+        'publicaciones': publicaciones, 'errores': errores, 'avisos': avisos,
+        'recuperacion_documental': recuperacion,
+        'advertencia': 'Evaluación EMM heurística sobre textos disponibles, sin descarte automático. La fecha de índice no acredita la fecha de publicación.',
         'historico': {'corte_previo': (anterior or {}).get('fecha_ejecucion_utc'),
                       'urls_heredadas': heredadas, 'urls_unicas_actuales': len(urls)},
     }

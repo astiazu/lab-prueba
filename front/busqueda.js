@@ -79,6 +79,16 @@
                 enlace.target = "_blank";
                 enlace.rel = "noopener noreferrer";
             }
+            if (publicacion.evaluacion_contextual) {
+                const evaluacion = publicacion.evaluacion_contextual;
+                texto(articulo, "p", `Score EMM: ${evaluacion.score_emm}`);
+                texto(articulo, "p", evaluacion.justificacion);
+                texto(articulo, "p", `Recuperación: ${publicacion.recuperacion?.estado || "Sin información"}`);
+                const detalle = document.createElement("details");
+                texto(detalle, "summary", "Cuerpo extraído");
+                texto(detalle, "p", publicacion.cuerpo_extraido || "Sin cuerpo disponible");
+                articulo.append(detalle);
+            }
             panel.append(articulo);
         }
     }
