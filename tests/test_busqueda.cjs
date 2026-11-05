@@ -16,8 +16,8 @@ const elementos = Object.fromEntries(['form', 'marco', 'desde', 'hasta', 'estado
 let observador;
 let peticion;
 const respuesta = {
-    total_urls_unicas: 1, solicitudes_exitosas: 0, origenes: ['Demo local'],
-    publicaciones: [{ titulo: '[SIMULADO] Prueba', origen: 'Demo local', fecha: '2025-01-01', resumen: '<script>texto</script>', url: 'https://example.com/demo' }],
+    total_urls_unicas: 1, solicitudes_exitosas: 0, origenes: { 'example.com': 1 }, simulado: true,
+    publicaciones: [{ titulo: '[SIMULADO] Prueba', origen: 'Demo local', fecha_indice: '2025-01-01', descripcion: '<script>texto</script>', url: 'https://example.com/demo' }],
     errores: [], avisos: [], advertencia: 'MODO DEMO', periodo: { desde: '2025-01-01', hasta: '2025-12-31' },
 };
 vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
@@ -44,6 +44,8 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     const panel = elementos.form.siguiente;
     assert.equal(panel.children[0].textContent, 'Resultados de prueba');
     assert.equal(panel.children.at(-1).children[2].textContent, '<script>texto</script>');
+    assert.equal(panel.children[4].textContent, 'Orígenes: example.com: 1');
+    assert.ok(panel.children.at(-1).children[3].textContent.startsWith('URL ficticia'));
     elementos.marco.events.input();
     assert.equal(boton.disabled, true);
     assert.equal(panel.children.length, 0);

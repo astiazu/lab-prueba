@@ -52,18 +52,26 @@
         const kpis = document.createElement("div");
         kpis.className = "kpis";
         texto(kpis, "article", `URLs únicas: ${datos.total_urls_unicas}`);
-        texto(kpis, "article", `Solicitudes externas exitosas: ${datos.solicitudes_exitosas}`);
+        texto(kpis, "article", `${datos.simulado ? "Operaciones locales exitosas" : "Solicitudes exitosas"}: ${datos.solicitudes_exitosas}`);
         panel.append(kpis);
-        texto(panel, "p", `Orígenes: ${datos.origenes.join(", ")}`);
+        const origenes = Array.isArray(datos.origenes)
+            ? datos.origenes.join(", ")
+            : Object.entries(datos.origenes).map(([origen, cantidad]) => `${origen}: ${cantidad}`).join(", ");
+        texto(panel, "p", `Orígenes: ${origenes}`);
         for (const aviso of [...datos.avisos, ...datos.errores]) {
-            texto(panel, "p", aviso);
+            texto(panel, "p", typeof aviso === "string" ? aviso : `${aviso.proveedor || "Motor"}: ${aviso.error || JSON.stringify(aviso)}`);
         }
         for (const publicacion of datos.publicaciones) {
             const articulo = document.createElement("article");
             articulo.className = "pub";
             texto(articulo, "h3", publicacion.titulo);
-            texto(articulo, "p", `${publicacion.origen} · ${publicacion.fecha}`);
-            texto(articulo, "p", publicacion.resumen);
+            texto(articulo, "p", `${publicacion.origen} · ${publicacion.fecha || publicacion.fecha_indice || publicacion.youtube?.publicado_en || "Fecha no disponible"}`);
+            texto(articulo, "p", publicacion.resumen || publicacion.descripcion || "Sin descripción");
+            if (datos.simulado) {
+                texto(articulo, "p", "URL ficticia (sin navegación): " + publicacion.url);
+                panel.append(articulo);
+                continue;
+            }
             const url = new URL(publicacion.url);
             if (["https:", "http:"].includes(url.protocol)) {
                 const enlace = texto(articulo, "a", "Enlace de ejemplo");

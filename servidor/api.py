@@ -1,12 +1,11 @@
 """Transporte HTTP y endpoint inicial de búsqueda."""
 
 import json
+import logging
 from datetime import date
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit
-
-from app.laboratorio.motor import buscar_demo
 
 FRONT = Path(__file__).resolve().parent.parent / "front"
 MAX_CUERPO = 1024 * 1024
@@ -76,5 +75,21 @@ class ManejadorHTTP(SimpleHTTPRequestHandler):
         except (ValueError, TypeError, KeyError):
             self.error_json(400, "periodo_invalido", "Se requiere periodo con desde y hasta válidos, en orden cronológico.")
             return
-        resultado = buscar_demo(datos["marco"].strip(), {"desde": desde.isoformat(), "hasta": hasta.isoformat()})
+        payload = {**datos, "marco": datos["marco"].strip(),
+                   "periodo": {"desde": desde.isoformat(), "hasta": hasta.isoformat()}}
+        try:
+            # Import diferido: una dependencia ausente debe producir JSON, no impedir el arranque.
+            from app.laboratorio.interfaz_v2.descubrimiento_integrado import ejecutar_busqueda
+            resultado = ejecutar_busqueda(payload)
+        except ImportError:
+            logging.exception("No se pudo cargar el motor de descubrimiento")
+            self.error_json(500, "motor_no_disponible", "No se pudo cargar una dependencia del motor.")
+            return
+        except ValueError as exc:
+            self.error_json(400, "entrada_motor_invalida", str(exc))
+            return
+        except Exception:
+            logging.exception("Falló el motor de descubrimiento")
+            self.error_json(500, "error_motor", "El motor no pudo completar la búsqueda.")
+            return
         self.responder_json(200, resultado)

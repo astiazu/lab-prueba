@@ -1,8 +1,14 @@
 """Pruebas HTTP del contrato de demostración, con Python estándar."""
+import builtins
 import http.client
 import json
 import threading
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+from app.laboratorio.interfaz_v2 import descubrimiento_integrado as motor
 from http.server import ThreadingHTTPServer
 
 from servidor.api import ManejadorHTTP
@@ -11,6 +17,9 @@ from servidor.api import ManejadorHTTP
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.temporal = tempfile.TemporaryDirectory()
+        cls.destino = patch.object(motor, 'DESTINO', Path(cls.temporal.name) / 'datos' / 'ejecuciones' / 'stub')
+        cls.destino.start()
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), ManejadorHTTP)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -20,6 +29,8 @@ class ApiTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join()
+        cls.destino.stop()
+        cls.temporal.cleanup()
 
     def post(self, datos):
         conexion = http.client.HTTPConnection(*self.server.server_address)
@@ -34,16 +45,19 @@ class ApiTests(unittest.TestCase):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}
         estado, datos = self.post({'marco': 'Entidad libre; Contexto libre; Territorio libre', 'periodo': periodo})
         self.assertEqual(estado, 200)
-        self.assertEqual(set(datos), {'total_urls_unicas', 'solicitudes_exitosas', 'origenes', 'publicaciones', 'errores', 'avisos', 'advertencia', 'periodo'})
+        self.assertTrue(set(datos) >= {'total_urls_unicas', 'solicitudes_exitosas', 'origenes', 'publicaciones', 'errores', 'avisos', 'advertencia', 'periodo'})
         self.assertEqual(datos['periodo'], periodo)
         self.assertEqual(len(datos['publicaciones']), 3)
         self.assertEqual(datos['total_urls_unicas'], len({p['url'] for p in datos['publicaciones']}))
-        self.assertEqual(datos['solicitudes_exitosas'], 0)
+        self.assertGreater(datos['solicitudes_exitosas'], 0)
+        self.assertEqual(datos['solicitudes_externas'], 0)
+        self.assertTrue(datos['simulado'])
+        self.assertTrue(Path(motor.DESTINO).is_dir())
         self.assertIn('DEMO', datos['advertencia'])
         for publicacion in datos['publicaciones']:
-            self.assertIn('Entidad libre', publicacion['titulo'])
-            self.assertIn('Contexto libre', publicacion['resumen'])
-            self.assertIn('Territorio libre', publicacion['resumen'])
+            self.assertIn('[SIMULADO]', publicacion['titulo'])
+            self.assertTrue(publicacion['proveedores'])
+        self.assertEqual(datos['recuperacion_documental']['resumen']['total_candidatos'], 3)
 
     def test_invalid_input(self):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}
@@ -57,6 +71,33 @@ class ApiTests(unittest.TestCase):
                 estado, datos = self.post({'marco': 'a;b;c', 'periodo': periodo})
                 self.assertEqual(estado, 400)
                 self.assertEqual(datos['error']['codigo'], 'periodo_invalido')
+
+    def test_engine_errors_are_json(self):
+        payload = {'marco': 'a;b;c', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}}
+        for error, status, code in [(ImportError('dependencia'), 500, 'motor_no_disponible'),
+                                    (ValueError('Presupuesto inválido'), 400, 'entrada_motor_invalida'),
+                                    (OSError('ruta interna privada'), 500, 'error_motor')]:
+            with self.subTest(error=error), patch.object(motor, 'ejecutar_busqueda', side_effect=error):
+                estado, datos = self.post(payload)
+                self.assertEqual(estado, status)
+                self.assertEqual(datos['error']['codigo'], code)
+                self.assertNotIn('ruta interna privada', json.dumps(datos))
+
+    def test_missing_import_is_json(self):
+        importar = builtins.__import__
+        def sin_motor(nombre, *args, **kwargs):
+            if nombre == 'app.laboratorio.interfaz_v2.descubrimiento_integrado':
+                raise ImportError('Motor ausente')
+            return importar(nombre, *args, **kwargs)
+        with patch('builtins.__import__', side_effect=sin_motor):
+            estado, datos = self.post({'marco': 'a;b;c', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}})
+        self.assertEqual(estado, 500)
+        self.assertEqual(datos['error']['codigo'], 'motor_no_disponible')
+
+    def test_budget_is_forwarded_to_engine(self):
+        estado, datos = self.post({'marco': 'a;b;c', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}, 'max_brave': -1})
+        self.assertEqual(estado, 400)
+        self.assertEqual(datos['error']['codigo'], 'entrada_motor_invalida')
 
 
 if __name__ == '__main__':
