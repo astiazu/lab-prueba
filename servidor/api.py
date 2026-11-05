@@ -7,6 +7,8 @@ from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from app.laboratorio.interfaz_v2.descubrimiento_brave import BraveError
+
 FRONT = Path(__file__).resolve().parent.parent / "front"
 MAX_CUERPO = 1024 * 1024
 
@@ -84,6 +86,9 @@ class ManejadorHTTP(SimpleHTTPRequestHandler):
         except ImportError:
             logging.exception("No se pudo cargar el motor de descubrimiento")
             self.error_json(500, "motor_no_disponible", "No se pudo cargar una dependencia del motor.")
+            return
+        except BraveError as exc:
+            self.error_json(exc.http_status, exc.codigo, str(exc))
             return
         except ValueError as exc:
             self.error_json(400, "entrada_motor_invalida", str(exc))

@@ -2,7 +2,7 @@
 
 - Construir un motor universal de descubrimiento EMM: separar el transporte HTTP, la lógica del laboratorio y la persistencia.
 - No hardcodear entidades, nombres, categorías ni reglas específicas de un dominio. Recibirlos mediante datos o configuración.
-- Usar exclusivamente la librería estándar de Python para el backend y SQLite mediante `sqlite3` para persistencia.
+- Usar la librería estándar de Python para el backend y SQLite mediante `sqlite3` para persistencia. La única dependencia externa autorizada es `python-dotenv` para cargar `.env`.
 - Devolver todos los errores de la API en JSON con la forma `{"error": {"codigo": "...", "mensaje": "..."}}` y un estado HTTP apropiado.
 - Guardar las bases SQLite en `datos/`; no versionar bases generadas ni secretos.
 - Mantener los stubs explícitos: no presentar resultados simulados como búsquedas reales.

@@ -2,6 +2,7 @@
 import builtins
 import http.client
 import json
+import os
 import threading
 import unittest
 import tempfile
@@ -20,9 +21,11 @@ class ApiTests(unittest.TestCase):
         cls.temporal = tempfile.TemporaryDirectory()
         cls.destino = patch.object(motor, 'DESTINO', Path(cls.temporal.name) / 'datos' / 'ejecuciones' / 'stub')
         cls.destino.start()
-        from app.laboratorio.interfaz_v2.stubs import resultados_web
-        cls.ddg = patch.object(motor.ddg, 'consultar', side_effect=lambda q, cursor=None, con_diagnostico=False: (resultados_web(q), None, {'estado': 'OK', 'solicitudes_http': 0}) if con_diagnostico else (resultados_web(q), None))
-        cls.ddg.start()
+        cls.entorno = patch.dict(os.environ, {'BRAVE_API_KEY': 'clave-de-prueba'})
+        cls.entorno.start()
+        cls.proveedor = patch.object(motor.brave, '_brave', return_value={'web': {'results': [
+            {'url': 'https://example.org/nota', 'title': 'Nota de prueba', 'description': 'Descripción de prueba'}]}})
+        cls.proveedor.start()
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), ManejadorHTTP)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -32,7 +35,8 @@ class ApiTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join()
-        cls.ddg.stop()
+        cls.proveedor.stop()
+        cls.entorno.stop()
         cls.destino.stop()
         cls.temporal.cleanup()
 
@@ -45,23 +49,23 @@ class ApiTests(unittest.TestCase):
         finally:
             conexion.close()
 
-    def test_demo_contract(self):
+    def test_brave_contract(self):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}
         estado, datos = self.post({'marco': 'Entidad libre; Contexto libre; Territorio libre', 'periodo': periodo})
         self.assertEqual(estado, 200)
         self.assertTrue(set(datos) >= {'total_urls_unicas', 'solicitudes_exitosas', 'origenes', 'publicaciones', 'errores', 'avisos', 'advertencia', 'periodo'})
         self.assertEqual(datos['periodo'], periodo)
-        self.assertEqual(len(datos['publicaciones']), 3)
+        self.assertEqual(len(datos['publicaciones']), 1)
         self.assertEqual(datos['total_urls_unicas'], len({p['url'] for p in datos['publicaciones']}))
         self.assertGreater(datos['solicitudes_exitosas'], 0)
-        self.assertEqual(datos['solicitudes_externas'], 0)
-        self.assertTrue(datos['simulado'])
+        self.assertGreater(datos['solicitudes_externas'], 0)
+        self.assertFalse(datos['simulado'])
         self.assertTrue(Path(motor.DESTINO).is_dir())
-        self.assertIn('MIXTO', datos['advertencia'])
+        self.assertEqual(datos['modo'], 'BRAVE_SEARCH_REAL')
         for publicacion in datos['publicaciones']:
-            self.assertIn('[SIMULADO]', publicacion['titulo'])
+            self.assertFalse(publicacion['simulado'])
             self.assertTrue(publicacion['proveedores'])
-        self.assertEqual(datos['recuperacion_documental']['resumen']['total_candidatos'], 3)
+        self.assertNotIn('recuperacion_documental', datos)
 
     def test_invalid_input(self):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}
@@ -97,6 +101,12 @@ class ApiTests(unittest.TestCase):
             estado, datos = self.post({'marco': 'a;b;c', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}})
         self.assertEqual(estado, 500)
         self.assertEqual(datos['error']['codigo'], 'motor_no_disponible')
+
+    def test_missing_key_is_json(self):
+        with patch.dict(os.environ, {'BRAVE_API_KEY': ''}):
+            estado, datos = self.post({'marco': 'a;b;c', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}})
+        self.assertEqual(estado, 503)
+        self.assertEqual(datos['error']['codigo'], 'brave_no_configurado')
 
     def test_budget_is_forwarded_to_engine(self):
         estado, datos = self.post({'marco': 'a;b;c', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}, 'max_brave': -1})
