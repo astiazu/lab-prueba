@@ -1,11 +1,12 @@
 """Transporte HTTP y endpoint inicial de búsqueda."""
 
 import json
+from datetime import date
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from app.laboratorio.motor import buscar
+from app.laboratorio.motor import buscar_demo
 
 FRONT = Path(__file__).resolve().parent.parent / "front"
 MAX_CUERPO = 1024 * 1024
@@ -57,12 +58,23 @@ class ManejadorHTTP(SimpleHTTPRequestHandler):
         except (ValueError, UnicodeError):
             self.error_json(400, "json_invalido", "El cuerpo debe ser JSON válido.")
             return
-        if not isinstance(datos, dict) or not isinstance(datos.get("consulta"), str) or not datos["consulta"].strip():
-            self.error_json(400, "consulta_invalida", "Se requiere una consulta de texto no vacía.")
+        if not isinstance(datos, dict) or not isinstance(datos.get("marco"), str) or not datos["marco"].strip():
+            self.error_json(400, "marco_invalido", "Se requiere un marco de texto no vacío.")
             return
+        partes = [parte.strip() for parte in datos["marco"].split(";")]
+        if len(partes) != 3 or not all(partes):
+            self.error_json(400, "marco_invalido", "Use ENTIDAD ; CONTEXTO ; TERRITORIO.")
+            return
+        periodo = datos.get("periodo")
         try:
-            resultado = buscar(datos["consulta"].strip())
-        except NotImplementedError:
-            self.error_json(501, "busqueda_pendiente", "El motor de búsqueda aún no está implementado.")
+            if not isinstance(periodo, dict):
+                raise ValueError
+            desde = date.fromisoformat(periodo["desde"])
+            hasta = date.fromisoformat(periodo["hasta"])
+            if desde > hasta:
+                raise ValueError
+        except (ValueError, TypeError, KeyError):
+            self.error_json(400, "periodo_invalido", "Se requiere periodo con desde y hasta válidos, en orden cronológico.")
             return
+        resultado = buscar_demo(datos["marco"].strip(), {"desde": desde.isoformat(), "hasta": hasta.isoformat()})
         self.responder_json(200, resultado)
