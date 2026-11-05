@@ -1,18 +1,52 @@
 <!doctype html>
 <html lang="es">
-  <head>
+<head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Laboratorio de descubrimiento EMM</title>
-  </head>
-  <body>
+    <title>Laboratorio EMM</title>
+    <style>
+        body { font-family: monospace; max-width: 800px; margin: 20px; }
+        textarea { width: 100%; height: 80px; margin-bottom: 10px; }
+        .actions { margin-top: 15px; }
+        .panel { margin-top: 30px; border-top: 1px solid #000; padding-top: 10px; }
+        .kpis { display: flex; gap: 10px; margin: 10px 0; }
+        .kpis article { border: 1px solid #000; padding: 5px 10px; }
+        .pub { border-bottom: 1px dashed #ccc; padding: 10px 0; }
+    </style>
+</head>
+<body>
     <h1>Laboratorio de descubrimiento EMM</h1>
-    <form id="formulario-busqueda">
-      <label for="consulta">Consulta</label>
-      <input id="consulta" name="consulta" type="text" required>
-      <button type="submit" disabled>Buscar</button>
+    
+    <form id="form">
+        <label>Marco de Búsqueda (ENTIDAD ; CONTEXTO ; TERRITORIO):</label><br>
+        <textarea id="marco" placeholder="Ej: Juan Zamora; candidato a Intendente, músico; Mina Clavero, Córdoba"></textarea>
+        
+        <label>Desde: <input type="date" id="desde" value="2024-01-01"></label>
+        <label>Hasta: <input type="date" id="hasta" value="2025-12-31"></label>
+        
+        <!-- Ocultos para que busqueda.js no falle -->
+        <select id="periodo" style="display:none;"><option value="custom">Custom</option></select>
+        <div id="consulta" style="display:none;"></div>
+        <p id="estado-consulta" style="display:none;">Sin validar</p>
+        <p id="periodo-resuelto" style="display:none;"></p>
+
+        <div class="actions">
+            <button type="button" id="validar">Validar Marco</button>
+            <!-- El script de búsqueda insertará el botón Buscar aquí -->
+        </div>
     </form>
-    <p>Interfaz inicial. La búsqueda estará disponible cuando se conecte el motor.</p>
+
     <script src="busqueda.js"></script>
-  </body>
+    <script>
+        // Simula el validador que espera busqueda.js
+        document.getElementById('validar').addEventListener('click', () => {
+            const m = document.getElementById('marco').value;
+            const d = document.getElementById('desde').value;
+            const h = document.getElementById('hasta').value;
+            if(!m || !d || !h) return alert("Faltan datos");
+            
+            document.getElementById('estado-consulta').textContent = `Consulta validada: ${m}`;
+            document.getElementById('periodo-resuelto').textContent = `Periodo: ${d} a ${h}`;
+        });
+    </script>
+</body>
 </html>
