@@ -1,5 +1,6 @@
 """Lectura de videos ya descubiertos mediante YouTube Data API v3."""
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from app.laboratorio.interfaz_v2.descubrimiento_brave import _SinRedireccion
 VIDEO_ID = re.compile(r'[A-Za-z0-9_-]{11}')
 ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos'
 MAX_BYTES = 4 * 1024 * 1024
+LOG = logging.getLogger(__name__)
 _abrir_url = build_opener(_SinRedireccion()).open
 
 
@@ -75,6 +77,8 @@ def detalles(ids, clave=None):
     solicitud = Request(ENDPOINT + '?' + urlencode(parametros), headers={'Accept': 'application/json', 'Accept-Encoding': 'identity'})
     try:
         with _abrir_url(solicitud, timeout=15) as respuesta:
+            estado = getattr(respuesta, 'status', 200)
+            LOG.info('[YOUTUBE_API] HTTP %s; lote de %s videos', estado, len(ids))
             cuerpo = respuesta.read(MAX_BYTES + 1)
         if len(cuerpo) > MAX_BYTES:
             raise ValueError
@@ -102,11 +106,14 @@ def detalles(ids, clave=None):
         return salida
     except HTTPError as exc:
         estado = exc.code
+        LOG.error('[YOUTUBE_API] Error HTTP %s; lote de %s videos', estado, len(ids))
         exc.close()
         raise YouTubeError('youtube_error_http', f'YouTube API devolvió HTTP {estado}; revisa acceso, clave o cuota.') from None
     except (URLError, OSError, HTTPException):
+        LOG.error('[YOUTUBE_API] Error de conexión; lote de %s videos', len(ids))
         raise YouTubeError('youtube_error_red', 'No se pudo conectar con YouTube API.') from None
     except (ValueError, UnicodeError):
+        LOG.error('[YOUTUBE_API] Respuesta JSON inválida; lote de %s videos', len(ids))
         raise YouTubeError('youtube_respuesta_invalida', 'YouTube API devolvió una respuesta inválida.') from None
 
 
@@ -141,6 +148,7 @@ def enriquecer_publicaciones(publicaciones, consultar_detalles=None):
                 datos = consultar(lote, clave)
                 exitosas += 1
             except YouTubeError as exc:
+                LOG.warning('[YOUTUBE_API] Lote no completado: %s', exc.codigo)
                 error = {'codigo': exc.codigo, 'mensaje': str(exc)}
                 errores.append({'proveedor': 'YOUTUBE_DATA_API_V3', 'codigo': exc.codigo, 'error': str(exc)})
                 for vid in ids[inicio:]:

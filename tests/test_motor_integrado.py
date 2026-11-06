@@ -31,11 +31,11 @@ class MotorTests(unittest.TestCase):
                 self.assertEqual(primero['solicitudes_por_proveedor'], {'BRAVE_WEB': 2, 'RECUPERACION_DOCUMENTAL': 0, 'YOUTUBE_DATA_API_V3': 0})
                 self.assertEqual(proveedor.call_count, 4)
                 self.assertEqual(proveedor.call_args.args[0], '"Entidad libre" AND (Territorio)')
-                publicacion = primero['publicaciones'][0]
+                publicacion = primero['publicaciones_descartadas'][0]
                 self.assertEqual(publicacion['proveedores'], ['BRAVE_WEB'])
                 self.assertEqual(len(publicacion['consultas_origen']), 2)
                 self.assertFalse(publicacion['simulado'])
-                self.assertEqual(len(json.loads(contenido)['publicaciones']), 1)
+                self.assertEqual(len(json.loads(contenido)['publicaciones_descartadas']), 1)
                 self.assertEqual(primero['recuperacion_documental']['pendientes'], 1)
                 self.assertEqual(publicacion['evaluacion_contextual']['score_emm'], 0.0)
 
@@ -84,7 +84,8 @@ class MotorTests(unittest.TestCase):
         self.assertEqual(resultado['consultas_pendientes'], 0)
         self.assertEqual({r['estrategia'] for r in resultado['consultas_ejecutadas']}, {'contexto', 'territorio', 'exploracion'})
         self.assertEqual({r['pagina'] for r in resultado['consultas_ejecutadas']}, {1, 2})
-        for doc in resultado['publicaciones']:
+        self.assertEqual(len(resultado['publicaciones_descartadas']), 63)
+        for doc in resultado['publicaciones_descartadas']:
             self.assertEqual(doc['fuente_especifica'], 'WEB')
             self.assertEqual(doc['metodo_recuperacion'], 'SNIPPET_BRAVE')
             self.assertTrue(doc['hallazgos_brave'][0]['recuperado_en'])
@@ -118,4 +119,34 @@ class MotorTests(unittest.TestCase):
             resultado = motor.ejecutar_busqueda({**PAYLOAD, 'max_brave': 3}, brave_consultar=proveedor)
         self.assertEqual(resultado['total_urls_unicas'], 1)
         self.assertEqual(resultado['solicitudes_intentadas'], 3)
-        self.assertEqual(resultado['publicaciones'][0]['hallazgos_brave'][0]['estrategia'], 'exploracion')
+        self.assertEqual(resultado['publicaciones_descartadas'][0]['hallazgos_brave'][0]['estrategia'], 'exploracion')
+
+    def test_backend_sorts_splits_and_preserves_rejected_history(self):
+        payload = {**PAYLOAD, 'marco': 'Elemento; Proceso; Zona', 'max_brave': 1, 'max_documentos_enriquecer': None}
+        entradas = [('a', 'Elemento', 'Proceso Zona'), ('b', 'Elemento', 'Elemento Proceso Zona'),
+                    ('c', 'Elemento', 'Proceso'), ('d', 'Elemento', ''),
+                    ('e', 'Tema diferente', 'Elemento Proceso Zona'), ('f', 'Sin relación', 'Texto ajeno')]
+        cuerpos = {f'https://example.org/{id}': cuerpo for id, titulo, cuerpo in entradas}
+        respuesta = {'web': {'results': [{'url': f'https://example.org/{id}', 'title': titulo} for id, titulo, cuerpo in entradas]}}
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
+            resultado = motor.ejecutar_busqueda(payload, brave_consultar=lambda *args: respuesta,
+                documental_obtener_html=lambda url: '<body>' + cuerpos[url] + '</body>')
+            snapshot = next(motor.DESTINO.glob('busqueda_integrada_*.json'))
+            previo = snapshot.read_bytes()
+            repetido = motor.ejecutar_busqueda(payload, brave_consultar=lambda *args: {'web': {'results': []}},
+                documental_obtener_html=lambda url: '<body>' + cuerpos[url] + '</body>')
+            self.assertEqual(snapshot.read_bytes(), previo)
+        self.assertEqual([p['score_emm'] for p in resultado['publicaciones']], [1.0, 0.8, 0.6])
+        self.assertEqual([p['score_emm'] for p in resultado['publicaciones_descartadas']], [0.4, 0.2, 0.0])
+        self.assertEqual(resultado['total_urls_unicas'], 6)
+        self.assertEqual(resultado['total_publicaciones_aceptadas'], 3)
+        self.assertEqual(resultado['total_publicaciones_descartadas'], 3)
+        self.assertEqual(repetido['historico']['urls_heredadas'], 6)
+        self.assertEqual(len(repetido['publicaciones_descartadas']), 3)
+
+    def test_exact_threshold_is_kept_in_main_array(self):
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'), patch.object(motor, 'evaluar_publicacion', return_value={'score_emm': 0.5, 'ubicacion_entidad': None}):
+            resultado = motor.ejecutar_busqueda(PAYLOAD, brave_consultar=lambda *args: RESPUESTA)
+        self.assertEqual(len(resultado['publicaciones']), 1)
+        self.assertEqual(resultado['publicaciones'][0]['score_emm'], 0.5)
+        self.assertEqual(resultado['publicaciones_descartadas'], [])

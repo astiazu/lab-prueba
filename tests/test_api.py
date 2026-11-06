@@ -24,7 +24,7 @@ class ApiTests(unittest.TestCase):
         cls.entorno = patch.dict(os.environ, {'BRAVE_API_KEY': 'clave-de-prueba'})
         cls.entorno.start()
         cls.proveedor = patch.object(motor.brave, '_brave', return_value={'web': {'results': [
-            {'url': 'https://example.org/nota', 'title': 'Nota de prueba', 'description': 'Descripción de prueba'}]}})
+            {'url': 'https://example.org/nota', 'title': 'Entidad libre', 'description': 'Descripción de prueba'}]}})
         cls.proveedor.start()
         from app.laboratorio.motor_v2 import recuperacion_documental_enriquecida as recuperacion
         cls.html = patch.object(recuperacion, 'descargar_html', return_value='<body>Entidad libre Contexto libre Territorio libre</body>')
@@ -70,7 +70,7 @@ class ApiTests(unittest.TestCase):
             self.assertFalse(publicacion['simulado'])
             self.assertTrue(publicacion['proveedores'])
         self.assertEqual(datos['recuperacion_documental']['documentos_con_texto'], 1)
-        self.assertEqual(datos['publicaciones'][0]['evaluacion_contextual']['score_emm'], 0.8)
+        self.assertEqual(datos['publicaciones'][0]['evaluacion_contextual']['score_emm'], 1.0)
 
     def test_invalid_input(self):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}

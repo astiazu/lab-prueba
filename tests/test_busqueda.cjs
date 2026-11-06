@@ -68,6 +68,11 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     assert.equal(panel.children.filter(e => e.className === 'pub').length, 0);
     assert.equal(panel.children.at(-1).textContent, '[4] publicaciones descartadas por no cumplir el Marco EMM.');
     assert.equal(respuesta.publicaciones.length, 4);
+    respuesta.publicaciones = [{ ...respuesta.publicaciones[0], score_emm: 0.6 }];
+    respuesta.total_publicaciones_descartadas = 7;
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.equal(panel.children.filter(e => e.className === 'pub').length, 1);
+    assert.equal(panel.children.at(-1).textContent, '[7] publicaciones descartadas por no cumplir el Marco EMM.');
     elementos.marco.events.input();
     assert.equal(boton.disabled, true);
     assert.equal(panel.children.length, 0);

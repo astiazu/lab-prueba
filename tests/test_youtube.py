@@ -22,6 +22,7 @@ class YouTubeTests(unittest.TestCase):
     def test_real_request_stats_missing_counts_and_timestamp(self):
         with patch.dict(os.environ, {'YOUTUBE_API_KEY': 'clave-de-prueba'}), patch.object(youtube, '_abrir_url', return_value=BytesIO(json.dumps(api_response()).encode())) as abrir:
             detalles = youtube.detalles([ID])
+        self.assertEqual(abrir.call_args.args[0].full_url.split('?')[0], 'https://www.googleapis.com/youtube/v3/videos')
         parametros = parse_qs(urlsplit(abrir.call_args.args[0].full_url).query)
         self.assertEqual(parametros['part'], ['snippet,statistics'])
         self.assertEqual(parametros['id'], [ID])
@@ -87,3 +88,18 @@ class YouTubeTests(unittest.TestCase):
                  ('https://gob.ar.evil.example/a', 'WEB'), ('https://example.org/?x=youtube.com', 'WEB')]
         for url, esperado in casos:
             self.assertEqual(fuente_especifica(url), esperado)
+
+    def test_http_error_is_logged_without_authenticated_url(self):
+        with patch.object(youtube, '_abrir_url', side_effect=HTTPError(youtube.ENDPOINT + '?key=clave-privada', 403, 'clave-privada', {}, BytesIO())), self.assertLogs(youtube.LOG, level='ERROR') as logs:
+            with self.assertRaises(youtube.YouTubeError):
+                youtube.detalles([ID], 'clave-privada')
+        salida = ' '.join(logs.output)
+        self.assertIn('Error HTTP 403', salida)
+        self.assertNotIn('clave-privada', salida)
+        self.assertNotIn('?key=', salida)
+
+    def test_reserved_characters_in_api_key_are_encoded(self):
+        with patch.object(youtube, '_abrir_url', return_value=BytesIO(json.dumps(api_response()).encode())) as abrir:
+            youtube.detalles([ID], 'prueba+&=/')
+        parametros = parse_qs(urlsplit(abrir.call_args.args[0].full_url).query)
+        self.assertEqual(parametros['key'], ['prueba+&=/'])

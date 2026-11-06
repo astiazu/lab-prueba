@@ -105,6 +105,26 @@ def evaluar_publicacion(marco, publicacion):
         score = 0.6
     else:
         score = 0.4
+    score_base = score
+    titulo = publicacion.get('titulo') if isinstance(publicacion.get('titulo'), str) else ''
+    cuerpo = publicacion.get('cuerpo_extraido') if isinstance(publicacion.get('cuerpo_extraido'), str) else ''
+    titulo_tokens = [_tokens(titulo)]
+    exactas_titulo = [e for e in marco.entidades if _tokens(e) and _menciones(_tokens(e), titulo_tokens)]
+    principal = _tokens(marco.entidades[0])
+    principal_titulo = bool(principal and _menciones(principal, titulo_tokens))
+    principal_inicio = bool(principal and _menciones(principal, [_tokens(cuerpo[:500])]))
+    penalizaciones = []
+    if entidad and not exactas_titulo:
+        score = min(score, 0.2)
+        penalizaciones.append({'codigo': 'entidad_sin_titulo_exacto', 'limite': 0.2,
+                                'motivo': 'La entidad no aparece completa en el título.'})
+    if entidad and not principal_titulo and not principal_inicio:
+        score = min(score, 0.3)
+        penalizaciones.append({'codigo': 'principal_ausente_del_inicio', 'limite': 0.3,
+                                'motivo': 'La primera entidad del Marco no está en el título ni en los primeros 500 caracteres del cuerpo.'})
+    detalles['entidades'].update(exactas_en_titulo=exactas_titulo,
+                                principal_en_titulo=principal_titulo,
+                                principal_en_primeros_500=principal_inicio)
     dimensiones = [('entidad', entidad), ('contexto', contexto), ('territorio', territorio)]
     presentes = [f'{nombre}: {", ".join(valores)}' for nombre, valores in dimensiones if valores]
     faltantes = [nombre for nombre, valores in dimensiones if not valores]
@@ -112,7 +132,9 @@ def evaluar_publicacion(marco, publicacion):
     justificacion += 'Falta: ' + (', '.join(faltantes) or 'ninguna dimensión') + '.'
     if entidad and contexto and territorio:
         justificacion += ' Entidad con múltiples menciones.' if repetida else ' Sin repetición de la entidad.'
-    return {'score_emm': score, 'detalles': detalles, 'match_entidad': entidad,
+    if penalizaciones:
+        justificacion += ' ' + ' '.join(p['motivo'] for p in penalizaciones)
+    return {'score_emm': score, 'score_base': score_base, 'penalizaciones': penalizaciones, 'detalles': detalles, 'match_entidad': entidad,
             'match_contexto': contexto, 'match_territorio': territorio,
             'menciones_por_dimension': menciones, 'justificacion': justificacion,
             'ubicacion_entidad': ubicaciones[0] if ubicaciones else None, 'ubicaciones_entidad': ubicaciones}

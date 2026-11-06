@@ -162,6 +162,20 @@ Scores:
 `evaluacion_contextual.detalles` conserva encontrados, faltantes y la evidencia
 por alternativa (`metodo`, `menciones`). También se guardan los matches,
 `menciones_por_dimension`, la justificación y el `score_emm` en cada publicación.
+Se conserva `score_base` antes de las penalizaciones y `penalizaciones` con el
+código, límite y motivo de cada regla aplicada:
+
+- Si hay coincidencia de entidad, pero ninguna alternativa completa aparece en
+  el título, el score se limita a 0.2. Las coincidencias parciales no evitan esta
+  penalización. La comparación exacta usa palabras completas sin distinguir
+  mayúsculas ni separar artificialmente título y cuerpo.
+- La entidad principal es la **primera alternativa** de Entidades en el Marco.
+  Si no está completa en el título ni en los primeros 500 caracteres del cuerpo,
+  el score se limita a 0.3. Si también aplica la regla anterior, prevalece 0.2.
+- Sin coincidencia de entidad el score sigue siendo 0.0.
+
+`detalles.entidades` indica `exactas_en_titulo`, `principal_en_titulo` y
+`principal_en_primeros_500`. No se usan listas de personas, profesiones ni temas.
 El backend conserva todo el inventario y los snapshots para auditoría.
 
 ## Visualización
@@ -170,7 +184,14 @@ El panel oculta publicaciones con score inferior a 0.5 y muestra al final
 `[X] publicaciones descartadas por no cumplir el Marco EMM.` Los scores ausentes
 o inválidos se tratan como no evaluados y se ocultan también. Los contadores de
 URLs y orígenes describen el inventario completo, no solo las filas visibles.
-No se borra información del JSON; el filtro se aplica solo en la presentación.
+El backend ordena de mayor a menor score y devuelve en `publicaciones` solo
+scores >= 0.5. Los demás se guardan, también ordenados, en
+`publicaciones_descartadas`. Un score exactamente 0.5 permanece en el principal.
+`total_publicaciones_aceptadas` y `total_publicaciones_descartadas` acompañan ambos
+arrays. `total_urls_unicas` y `origenes` siguen describiendo todo el inventario.
+El contador visual suma los descartes del servidor y cualquier descarte local de
+respuestas antiguas. Al reutilizar el histórico se recuperan **ambos** arrays para
+reevaluarlos: no se pierde una publicación por un descarte de una ejecución previa.
 
 Al iniciar con `python3 run.py`, la terminal muestra una línea `[EMM] i/total
 score_emm=...` por publicación después de recuperar el lote.
@@ -184,3 +205,13 @@ conserva todas las ubicaciones encontradas. La descripción de Brave copiada a
 `cuerpo_extraido` como respaldo se atribuye a `DESCRIPCION`, no a un HTML descargado.
 Esta trazabilidad aplica las mismas coincidencias completas/parciales de entidad;
 no modifica por sí misma las dimensiones ni el cálculo del score.
+
+## Diagnóstico de YouTube
+
+La base del cliente es exactamente `https://www.googleapis.com/youtube/v3/videos`.
+Los parámetros `part`, `id` y `key` se construyen con `urlencode`; los caracteres
+reservados de la clave no se concatenan sin codificar. La terminal registra
+`[YOUTUBE_API] HTTP ...` cuando recibe respuesta y `[YOUTUBE_API] Error HTTP ...`
+para fallos (por ejemplo 403). También distingue conexión fallida, JSON inválido
+y lotes no completados, manteniendo los errores estructurados del JSON.
+Nunca se registra la URL autenticada, la clave ni el cuerpo remoto de error.

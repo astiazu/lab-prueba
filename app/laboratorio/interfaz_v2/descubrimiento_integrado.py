@@ -22,7 +22,7 @@ def planificar(marco):
 
 
 def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=None, youtube_detalles=None):
-    """Descubrir con Brave, recuperar HTML y evaluar sin descartar candidatos."""
+    """Descubrir con Brave, recuperar HTML y evaluar y separar candidatos sin perder trazabilidad."""
     if not isinstance(payload, dict):
         raise ValueError('El payload debe ser un objeto JSON')
     texto = payload.get('marco')
@@ -64,7 +64,9 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
                     break
             except (ValueError, OSError, AttributeError):
                 continue
-    for doc in (anterior or {}).get('publicaciones', []):
+    inventario_anterior = ((anterior or {}).get('publicaciones', [])
+                           + (anterior or {}).get('publicaciones_descartadas', []))
+    for doc in inventario_anterior:
         if isinstance(doc, dict):
             url = brave._normalizar_url(doc.get('url'))
             if url and not doc.get('simulado') and doc.get('proveedores') == ['BRAVE_WEB']:
@@ -141,9 +143,12 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
         avisos.append('Hay documentos pendientes por presupuesto de recuperación; se evaluaron con título y descripción.')
     if any(p['recuperacion']['estado'] in ('ERROR', 'SIN_TEXTO') for p in publicaciones):
         avisos.append('Algunos documentos no aportaron cuerpo; su evaluación usa los textos disponibles.')
+    publicaciones.sort(key=lambda p: p['score_emm'], reverse=True)
+    descartadas = [p for p in publicaciones if p['score_emm'] < 0.5]
+    aceptadas = [p for p in publicaciones if p['score_emm'] >= 0.5]
     resultado = {
         'modo': 'BRAVE_SEARCH_REAL', 'simulado': False, 'proveedor': 'BRAVE_WEB',
-        'version': 'LAB_EMM_ESCALONADO_YOUTUBE_V3', 'nueva_busqueda': True,
+        'version': 'LAB_EMM_FILTRADO_V4', 'nueva_busqueda': True,
         'fecha_ejecucion_utc': ahora.isoformat(), 'marco': texto, 'periodo': periodo,
         'plan_consultas': plan_consultas, 'paginas_brave_maximas': paginas_brave,
         'solicitudes_exitosas': exitosas, 'solicitudes_intentadas': intentadas,
@@ -154,10 +159,13 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
         'pendientes_por_proveedor': {'BRAVE_WEB': pendientes},
         'cobertura_parcial': True,
         'total_urls_unicas': len(urls), 'origenes': dict(Counter(d['origen'] for d in urls.values())),
-        'publicaciones': publicaciones, 'errores': errores, 'avisos': avisos,
+        'publicaciones': aceptadas, 'publicaciones_descartadas': descartadas,
+        'total_publicaciones_aceptadas': len(aceptadas),
+        'total_publicaciones_descartadas': len(descartadas),
+        'errores': errores, 'avisos': avisos,
         'recuperacion_documental': recuperacion,
         'youtube_api': {k: v for k, v in datos_youtube.items() if k != 'publicaciones'},
-        'advertencia': 'Evaluación EMM heurística sobre textos disponibles, sin descarte automático. La fecha de índice no acredita la fecha de publicación.',
+        'advertencia': 'Evaluación EMM heurística sobre textos disponibles, resultados principales con score >= 0.5; descartes conservados para auditoría. La fecha de índice no acredita la fecha de publicación.',
         'historico': {'corte_previo': (anterior or {}).get('fecha_ejecucion_utc'),
                       'urls_heredadas': heredadas, 'urls_unicas_actuales': len(urls)},
     }
