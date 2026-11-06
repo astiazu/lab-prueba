@@ -11,6 +11,11 @@ from app.laboratorio.interfaz_v2 import descubrimiento_brave as brave
 
 
 class BraveTests(unittest.TestCase):
+    def setUp(self):
+        self.turno = patch.object(brave, '_esperar_turno')
+        self.turno.start()
+        self.addCleanup(self.turno.stop)
+
     def test_request_headers_query_and_dates(self):
         respuesta = {'web': {'results': [{'url': 'https://example.org', 'title': 'Título', 'description': 'Descripción'}]}}
         with patch.dict(os.environ, {'BRAVE_API_KEY': 'clave-de-prueba'}), patch.object(brave, '_abrir_url', return_value=BytesIO(json.dumps(respuesta).encode())) as abrir:
@@ -56,3 +61,18 @@ class BraveTests(unittest.TestCase):
 
     def test_redirects_are_not_followed(self):
         self.assertIsNone(brave._SinRedireccion().redirect_request(None, None, 302, '', {}, 'https://otro.example/'))
+
+    def test_page_offset_is_sent_and_validated(self):
+        with patch.object(brave, '_abrir_url', return_value=BytesIO(b'{"web":{"results":[]}}')) as abrir:
+            brave._brave('q', '2025-01-01', '2025-12-31', 'clave-de-prueba', offset=2)
+        self.assertEqual(parse_qs(urlsplit(abrir.call_args.args[0].full_url).query)['offset'], ['2'])
+        with self.assertRaises(ValueError):
+            brave._brave('q', '2025-01-01', '2025-12-31', 'clave-de-prueba', offset=10)
+
+
+class BraveRateLimiterTests(unittest.TestCase):
+    def test_calls_are_spaced_without_actual_sleep(self):
+        with patch.object(brave, '_ultimo_inicio', 100.0), patch.object(brave.time, 'monotonic', side_effect=[100.2, 101.1]), patch.object(brave.time, 'sleep') as dormir:
+            brave._esperar_turno()
+            self.assertAlmostEqual(dormir.call_args.args[0], 0.9)
+            self.assertEqual(brave._ultimo_inicio, 101.1)

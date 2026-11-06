@@ -28,12 +28,12 @@ class MotorTests(unittest.TestCase):
                 self.assertEqual(segundo['historico']['urls_heredadas'], 1)
                 self.assertEqual(primero['total_urls_unicas'], 1)
                 self.assertEqual(primero['errores'], [])
-                self.assertEqual(primero['solicitudes_por_proveedor'], {'BRAVE_WEB': 1, 'RECUPERACION_DOCUMENTAL': 0})
-                self.assertEqual(proveedor.call_count, 2)
-                self.assertEqual(proveedor.call_args.args[0], '("Entidad libre") AND (Contexto) AND ("Territorio")')
+                self.assertEqual(primero['solicitudes_por_proveedor'], {'BRAVE_WEB': 2, 'RECUPERACION_DOCUMENTAL': 0, 'YOUTUBE_DATA_API_V3': 0})
+                self.assertEqual(proveedor.call_count, 4)
+                self.assertEqual(proveedor.call_args.args[0], '"Entidad libre" AND (Territorio)')
                 publicacion = primero['publicaciones'][0]
                 self.assertEqual(publicacion['proveedores'], ['BRAVE_WEB'])
-                self.assertEqual(len(publicacion['consultas_origen']), 1)
+                self.assertEqual(len(publicacion['consultas_origen']), 2)
                 self.assertFalse(publicacion['simulado'])
                 self.assertEqual(len(json.loads(contenido)['publicaciones']), 1)
                 self.assertEqual(primero['recuperacion_documental']['pendientes'], 1)
@@ -70,3 +70,52 @@ class MotorTests(unittest.TestCase):
         self.assertEqual(len(plan), len({q for _, q in plan}))
         with self.assertRaises(ValueError):
             Marco.desde_input('a;b;c;d')
+
+    def test_stages_and_pagination_collect_more_than_twenty(self):
+        def proveedor(q, desde, hasta, clave, *, offset=0):
+            etapa = 0 if 'Contexto)' in q else 1 if 'Territorio)' in q else 2
+            cantidad = 20 if offset == 0 else 1
+            return {'query': {'more_results_available': offset == 0}, 'web': {'results': [
+                {'url': f'https://example.org/{etapa}/{offset}/{i}', 'title': 'Entidad libre'} for i in range(cantidad)]}}
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
+            resultado = motor.ejecutar_busqueda({**PAYLOAD, 'max_brave': 10, 'paginas_brave': 3}, brave_consultar=proveedor)
+        self.assertEqual(resultado['total_urls_unicas'], 63)
+        self.assertEqual(resultado['solicitudes_intentadas'], 6)
+        self.assertEqual(resultado['consultas_pendientes'], 0)
+        self.assertEqual({r['estrategia'] for r in resultado['consultas_ejecutadas']}, {'contexto', 'territorio', 'exploracion'})
+        self.assertEqual({r['pagina'] for r in resultado['consultas_ejecutadas']}, {1, 2})
+        for doc in resultado['publicaciones']:
+            self.assertEqual(doc['fuente_especifica'], 'WEB')
+            self.assertEqual(doc['metodo_recuperacion'], 'SNIPPET_BRAVE')
+            self.assertTrue(doc['hallazgos_brave'][0]['recuperado_en'])
+            self.assertIn('ubicacion_entidad', doc)
+
+    def test_youtube_api_success_skips_html_and_keeps_trace(self):
+        vid = 'abcDEF12345'
+        respuesta = {'web': {'results': [{'url': f'https://youtu.be/{vid}', 'title': 'Entidad libre', 'description': 'Resumen de Brave'}]}}
+        def detalles(ids, clave):
+            self.assertEqual(ids, [vid])
+            return {vid: {'metricas': {'vistas': 100, 'likes': 2, 'comentarios': None, 'fecha_publicacion': '2025-01-01T00:00:00Z'},
+                          'descripcion': 'Contexto Territorio'}}
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
+            resultado = motor.ejecutar_busqueda({**PAYLOAD, 'max_brave': 3}, brave_consultar=lambda *args: respuesta,
+                youtube_detalles=detalles, documental_obtener_html=lambda url: self.fail('No debe descargar HTML tras éxito API'))
+        doc = resultado['publicaciones'][0]
+        self.assertEqual(doc['metricas']['vistas'], 100)
+        self.assertEqual(doc['fuente_especifica'], 'YOUTUBE')
+        self.assertEqual(doc['metodo_recuperacion'], 'API_OFICIAL')
+        self.assertEqual(doc['ubicacion_entidad'], 'TITULO')
+        self.assertEqual(doc['descripcion'], 'Resumen de Brave')
+        self.assertEqual(doc['cuerpo_extraido'], 'Contexto Territorio')
+        self.assertEqual(resultado['recuperacion_documental']['solicitudes_intentadas'], 0)
+        self.assertEqual(resultado['youtube_api']['solicitudes_intentadas'], 1)
+        self.assertEqual(len(doc['hallazgos_brave']), 3)
+
+    def test_empty_context_and_territory_fall_through_to_exploration(self):
+        def proveedor(q, *args):
+            return RESPUESTA if q == '"Entidad libre"' else {'web': {'results': []}}
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
+            resultado = motor.ejecutar_busqueda({**PAYLOAD, 'max_brave': 3}, brave_consultar=proveedor)
+        self.assertEqual(resultado['total_urls_unicas'], 1)
+        self.assertEqual(resultado['solicitudes_intentadas'], 3)
+        self.assertEqual(resultado['publicaciones'][0]['hallazgos_brave'][0]['estrategia'], 'exploracion')

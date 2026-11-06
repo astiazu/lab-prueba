@@ -15,7 +15,7 @@ def cargar_entorno(ruta=None):
     # la variable del proceso existe pero no contiene una clave utilizable.
     if ruta.is_file():
         valores = dotenv_values(ruta, encoding="utf-8-sig")
-        for nombre in ("BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"):
+        for nombre in ("BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY", "YOUTUBE_API_KEY"):
             if not (os.environ.get(nombre) or "").strip():
                 valor = valores.get(nombre)
                 if valor and valor.strip():

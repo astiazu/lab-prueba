@@ -1,5 +1,5 @@
 import unittest
-from app.laboratorio.interfaz_v2.planificador_consultas import construir_consulta
+from app.laboratorio.interfaz_v2.planificador_consultas import construir_consulta, planificar_consultas
 
 
 class PlanificadorTests(unittest.TestCase):
@@ -18,3 +18,12 @@ class PlanificadorTests(unittest.TestCase):
         for marco in ('a;b', 'a;;c', '"";b;c'):
             with self.subTest(marco=marco), self.assertRaises(ValueError):
                 construir_consulta(marco)
+
+    def test_staged_plan_per_entity(self):
+        plan = planificar_consultas('Proyecto Azul, Producto; Diseño modular, experimental; Región Sur, Zona Norte')
+        self.assertEqual(plan, [
+            ('contexto', '"Proyecto Azul" AND ("Diseño modular" OR experimental)'),
+            ('contexto', '"Producto" AND ("Diseño modular" OR experimental)'),
+            ('territorio', '"Proyecto Azul" AND ("Región Sur" OR "Zona Norte")'),
+            ('territorio', '"Producto" AND ("Región Sur" OR "Zona Norte")'),
+            ('exploracion', '"Proyecto Azul"'), ('exploracion', '"Producto"')])

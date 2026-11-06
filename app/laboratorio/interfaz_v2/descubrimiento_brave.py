@@ -1,6 +1,8 @@
 """Cliente de la API oficial Brave Search, mediante la librería estándar."""
 import json
 import os
+import threading
+import time
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -11,6 +13,20 @@ from app.laboratorio.configuracion import cargar_entorno
 ENDPOINT = 'https://api.search.brave.com/res/v1/web/search'
 TIMEOUT = 15
 MAX_BYTES = 4 * 1024 * 1024
+_TURNO = threading.Lock()
+_ultimo_inicio = None
+
+
+def _esperar_turno():
+    """Espaciar solicitudes para los planes de Brave con límite de 1/s."""
+    global _ultimo_inicio
+    with _TURNO:
+        ahora = time.monotonic()
+        if _ultimo_inicio is not None:
+            pausa = max(0, 1.1 - (ahora - _ultimo_inicio))
+            if pausa:
+                time.sleep(pausa)
+        _ultimo_inicio = time.monotonic()
 
 
 class BraveError(RuntimeError):
@@ -51,16 +67,19 @@ def _normalizar_url(url):
         return None
 
 
-def _brave(consulta, desde, hasta, clave=None):
+def _brave(consulta, desde, hasta, clave=None, *, offset=0):
     clave = clave if clave is not None else clave_brave()
     if not clave:
         raise BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY o BRAVE_SEARCH_API_KEY en el entorno o en .env.', 503)
-    parametros = {'q': consulta, 'count': 20, 'freshness': f'{desde}to{hasta}'}
+    if type(offset) is not int or not 0 <= offset <= 9:
+        raise ValueError('offset de Brave fuera de rango (0..9)')
+    parametros = {'q': consulta, 'count': 20, 'offset': offset, 'freshness': f'{desde}to{hasta}'}
     solicitud = Request(ENDPOINT + '?' + urlencode(parametros), headers={
         'Accept': 'application/json', 'Accept-Encoding': 'identity',
         'User-Agent': 'EMM-Laboratorio/1.0', 'X-Subscription-Token': clave,
     })
     try:
+        _esperar_turno()
         with _abrir_url(solicitud, timeout=TIMEOUT) as respuesta:
             cuerpo = respuesta.read(MAX_BYTES + 1)
         if len(cuerpo) > MAX_BYTES:

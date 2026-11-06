@@ -130,3 +130,13 @@ class RecuperacionTests(unittest.TestCase):
         self.assertEqual(resultado['publicaciones'][2]['recuperacion']['estado'], 'ERROR')
         self.assertEqual(resultado['recuperacion_documental']['documentos_con_texto'], 2)
         self.assertEqual(resultado['errores'][0]['proveedor'], 'RECUPERACION_DOCUMENTAL')
+
+    def test_recovery_method_html_vs_snippet(self):
+        candidato = {'url': 'https://example.org/1', 'descripcion': 'Resumen de Brave'}
+        html = recuperacion.enriquecer([candidato], obtener_html=lambda url: '<body>Cuerpo</body>')['publicaciones'][0]
+        self.assertEqual(html['metodo_recuperacion'], 'HTML_SCRAPING')
+        def falla(url):
+            raise recuperacion.ErrorRecuperacion('error_http', 'HTTP 403')
+        snippet = recuperacion.enriquecer([candidato], obtener_html=falla)['publicaciones'][0]
+        self.assertEqual(snippet['metodo_recuperacion'], 'SNIPPET_BRAVE')
+        self.assertEqual(snippet['cuerpo_extraido'], 'Resumen de Brave')

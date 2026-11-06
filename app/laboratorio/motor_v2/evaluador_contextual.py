@@ -85,6 +85,16 @@ def evaluar_publicacion(marco, publicacion):
         matches[dimension] = encontrados
         # Exigir repetición de una misma alternativa; no inflar por alternativas solapadas.
         menciones[dimension] = max((e['menciones'] for e in evidencia), default=0)
+    ubicaciones = []
+    for campo, etiqueta in (('titulo', 'TITULO'), ('cuerpo_extraido', 'CUERPO'), ('descripcion', 'DESCRIPCION')):
+        if campo == 'cuerpo_extraido' and (publicacion.get('recuperacion') or {}).get('fuente_texto') == 'DESCRIPCION_BRAVE':
+            continue
+        contenido = publicacion.get(campo)
+        if not isinstance(contenido, str):
+            continue
+        secuencia = [_tokens(contenido)]
+        if any((_menciones(_tokens(e), secuencia) or _partes_principales(_tokens(e), secuencia)) for e in marco.entidades if _tokens(e)):
+            ubicaciones.append(etiqueta)
     entidad, contexto, territorio = (matches[d] for d in ('entidades', 'contextos', 'territorios'))
     repetida = menciones['entidades'] >= 2
     if not entidad:
@@ -104,4 +114,5 @@ def evaluar_publicacion(marco, publicacion):
         justificacion += ' Entidad con múltiples menciones.' if repetida else ' Sin repetición de la entidad.'
     return {'score_emm': score, 'detalles': detalles, 'match_entidad': entidad,
             'match_contexto': contexto, 'match_territorio': territorio,
-            'menciones_por_dimension': menciones, 'justificacion': justificacion}
+            'menciones_por_dimension': menciones, 'justificacion': justificacion,
+            'ubicacion_entidad': ubicaciones[0] if ubicaciones else None, 'ubicaciones_entidad': ubicaciones}

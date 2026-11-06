@@ -50,3 +50,11 @@ class RunTests(unittest.TestCase):
                     run.main()
                     self.assertEqual(os.environ['BRAVE_API_KEY'], esperado)
                     servidor.return_value.server_close.assert_called_once()
+
+    def test_youtube_key_from_dotenv_with_empty_process_binding(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            ruta = Path(temporal) / '.env'
+            ruta.write_text('YOUTUBE_API_KEY=clave-youtube-de-prueba\n')
+            from app.laboratorio.interfaz_v2.descubrimiento_youtube import clave_youtube
+            with patch.dict(os.environ, {'YOUTUBE_API_KEY': ''}), patch.object(configuracion, 'RUTA_ENV', ruta):
+                self.assertEqual(clave_youtube(), 'clave-youtube-de-prueba')

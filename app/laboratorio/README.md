@@ -19,18 +19,21 @@ Usa el período como filtro `freshness=DESDEtoHASTA`, hasta 20 resultados por
 consulta, un timeout de 15 segundos y un máximo de 4 MiB por respuesta. Conserva
 TLS y el proxy del entorno y no sigue redirecciones con la clave.
 
-`ejecutar_busqueda(payload)` utiliza una consulta booleana estricta y consolida
+`ejecutar_busqueda(payload)` utiliza consultas escalonadas y consolida
 las URLs y sus consultas de origen. `max_brave` limita las consultas (1 a 50,
-por defecto 50). Solo se obtiene la primera página de cada consulta: los
-resultados no representan cobertura exhaustiva. La fecha del índice tampoco
+por defecto 50) incluyendo páginas. `paginas_brave` admite de 1 a 10 páginas
+por consulta, por defecto 3, de hasta 20 resultados cada una. No se garantiza
+cobertura exhaustiva ni un número mínimo de resultados. La fecha del índice tampoco
 acredita una fecha de publicación ni admisión EMM.
 
-No se ejecutan DDG, YouTube ni adaptadores de redes. Después de Brave se ejecutan
+No se ejecutan DDG ni adaptadores nativos de Facebook/Instagram/X. YouTube API
+se utiliza solo para enriquecer videos descubiertos por Brave. Después de Brave se ejecutan
 la recuperación documental y la evaluación contextual que se describen abajo.
-El planificador no agrega búsquedas abiertas ni restricciones de dominio ajenas
-al Marco. Los módulos locales de otros proveedores permanecen
+El planificador incluye exploración por entidad, sin términos temáticos o
+restricciones de dominio ajenas al Marco. Los módulos locales de otros proveedores permanecen
 inactivos para futuras integraciones; el adaptador y las pruebas DDG se retiraron.
-No se generan publicaciones simuladas ni se heredan snapshots de otros modos.
+No se generan publicaciones ni métricas simuladas; el histórico exige el mismo
+plan de consultas, Marco y período.
 
 Si falta la clave, la API devuelve HTTP 503 con un error JSON. Si Brave falla,
 el motor detiene nuevas solicitudes para no repetir errores de autenticación,
@@ -77,18 +80,58 @@ segundos por documento y límite de 2 MiB por HTML: lotes grandes pueden tardar.
 La red del entorno debe permitir los dominios de las publicaciones. Nunca se
 envía la cabecera de autenticación de Brave a esos sitios.
 
-## Consultas booleanas universales
+## Consultas escalonadas universales
 
-`interfaz_v2/planificador_consultas.py` construye una sola consulta:
-`(entidades OR ...) AND (contextos OR ...) AND (territorios OR ...)`.
-Las comas definen alternativas en las tres dimensiones, siguiendo la consulta
-de ejemplo del contrato del producto. Las frases de varias palabras se citan;
-los territorios se citan siempre. Los operadores introducidos como alternativas
-se tratan como texto literal. No se agregan vocabularios temáticos ni dominios.
+`planificar_consultas` devuelve, para cada entidad:
 
-El orquestador guarda la consulta en `consulta_booleana` y solo hereda snapshots
-con la misma consulta, Marco y período. Los snapshots de búsqueda natural se
-conservan en disco, pero no se mezclan con la búsqueda estricta.
+1. `"Entidad" AND (Contexto1 OR Contexto2)`.
+2. `"Entidad" AND (Territorio1 OR Territorio2)`.
+3. `"Entidad"`.
+
+Se ejecuta primero la etapa de contexto para todas las entidades, luego territorio
+y exploración. La paginación realiza rondas: primera página de todas las consultas,
+luego las siguientes. `max_brave` es el máximo total de peticiones. Se detiene una
+consulta si no hay más resultados, la página está vacía o se repite; ante un error
+de Brave se detiene el proveedor sin descartar los hallazgos existentes. El cliente
+espacia las peticiones al menos 1.1 segundos para planes limitados a una por segundo.
+
+`plan_consultas` y `consultas_ejecutadas` guardan estrategia, consulta y página.
+Cada publicación conserva `consultas_origen` y `hallazgos_brave` con la URL descubierta,
+la etapa, la página y la fecha de recuperación UTC. Las URLs se consolidan y los
+hallazgos se conservan por separado. Los snapshots anteriores quedan inmutables;
+solo se heredan si coincide todo el plan, Marco y período.
+
+## YouTube y trazabilidad para informes
+
+`YOUTUBE_API_KEY` se carga de `.env` o del entorno, sin sobrescribir un valor no
+vacío del proceso. Se consulta `https://www.googleapis.com/youtube/v3/videos`
+con `part=snippet,statistics`. No se busca directamente en YouTube. Los IDs de
+videos (watch, youtu.be, shorts, embed y live) se agrupan en lotes de hasta 50;
+variantes de URL del mismo ID comparten una lectura API. Canales o perfiles sin
+ID de video registran la imposibilidad de recuperar métricas de video.
+
+`publicacion.metricas` contiene `vistas`, `likes`, `comentarios`,
+`fecha_publicacion`, `recuperado_en`, `proveedor` y `video_id`. Un dato omitido
+por la API queda `null`, nunca cero inventado. Se preserva la descripción original
+de Brave; los metadatos nativos van en `metadatos_youtube`. Si la API falla,
+`error_metricas` identifica el problema y se intenta HTML/snippet. No se siguen
+redirecciones con la clave y no se registran URLs que incluyan credenciales.
+
+`fuente_especifica` se calcula sobre el hostname exacto o un subdominio válido:
+`YOUTUBE`, `FACEBOOK`, `INSTAGRAM`, `X`, `OFICIAL` (gov.ar/gob.ar) o `WEB`.
+Se clasifica la URL descubierta, sin inferir titularidad o contenido del sitio.
+
+`metodo_recuperacion` indica `API_OFICIAL` tras obtener datos de YouTube,
+`HTML_SCRAPING` si se extrae texto del HTML, o `SNIPPET_BRAVE` para el respaldo.
+`recuperacion.fuente_texto` permite distinguir específicamente el texto HTML,
+la descripción nativa de YouTube y el resumen de Brave; si tampoco hay resumen,
+queda `SIN_TEXTO`. El éxito API no se confunde con una descarga HTML y las
+métricas incluyen su fecha de lectura. Las cuentas de solicitudes API y HTML
+se exponen por separado en el resumen.
+
+El borrador de red añade `www.googleapis.com`; requiere revisar, guardar y
+publicar la configuración del entorno. También se necesita habilitar YouTube
+Data API v3 para la clave y disponer de cuota. El código no configura esos permisos.
 
 ## Paso 4: termómetro EMM flexible
 
@@ -131,3 +174,13 @@ No se borra información del JSON; el filtro se aplica solo en la presentación.
 
 Al iniciar con `python3 run.py`, la terminal muestra una línea `[EMM] i/total
 score_emm=...` por publicación después de recuperar el lote.
+
+## Ubicación de la entidad
+
+`ubicacion_entidad` se guarda tanto en la publicación como en su evaluación:
+`TITULO`, `CUERPO`, `DESCRIPCION`, o `null` si no hay coincidencia. La prioridad es
+el título, luego el cuerpo y por último la descripción. `ubicaciones_entidad`
+conserva todas las ubicaciones encontradas. La descripción de Brave copiada a
+`cuerpo_extraido` como respaldo se atribuye a `DESCRIPCION`, no a un HTML descargado.
+Esta trazabilidad aplica las mismas coincidencias completas/parciales de entidad;
+no modifica por sí misma las dimensiones ni el cálculo del score.

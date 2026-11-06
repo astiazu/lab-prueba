@@ -71,3 +71,15 @@ class EvaluadorTests(unittest.TestCase):
         marco = 'Proyecto Nébula Azul; Diseño; Zona'
         for texto in ('Proyecto', 'Proyecto ' + 'distancia ' * 20 + 'Nébula'):
             self.assertEqual(evaluar_publicacion(marco, {'cuerpo_extraido': texto})['score_emm'], 0.0)
+
+    def test_entity_location_priority_and_description_fallback(self):
+        marco = 'Entidad Alfa; Contexto; Territorio'
+        for publicacion, esperado in [
+            ({'titulo': 'Entidad Alfa', 'cuerpo_extraido': 'Entidad Alfa'}, 'TITULO'),
+            ({'titulo': 'Texto', 'cuerpo_extraido': 'Entidad Alfa'}, 'CUERPO'),
+            ({'descripcion': 'Entidad Alfa'}, 'DESCRIPCION'),
+            ({'cuerpo_extraido': 'Entidad Alfa', 'descripcion': 'Entidad Alfa', 'recuperacion': {'fuente_texto': 'DESCRIPCION_BRAVE'}}, 'DESCRIPCION'),
+            ({'titulo': 'Texto diferente'}, None),
+        ]:
+            with self.subTest(publicacion=publicacion):
+                self.assertEqual(evaluar_publicacion(marco, publicacion)['ubicacion_entidad'], esperado)

@@ -72,6 +72,16 @@ def enriquecer(candidatos, *, obtener_html=None, max_solicitudes=None):
         descripcion = doc.get('descripcion')
         doc['cuerpo_extraido'] = descripcion[:MAX_CARACTERES] if isinstance(descripcion, str) else ''
         doc['recuperacion'] = {'estado': 'PENDIENTE', 'error': None, 'fuente_texto': 'DESCRIPCION_BRAVE' if doc['cuerpo_extraido'] else 'SIN_TEXTO'}
+        if doc.get('metodo_recuperacion') == 'API_OFICIAL':
+            texto_api = (doc.get('metadatos_youtube') or {}).get('descripcion')
+            if isinstance(texto_api, str) and texto_api.strip():
+                doc['cuerpo_extraido'] = texto_api[:MAX_CARACTERES]
+                doc['recuperacion']['fuente_texto'] = 'YOUTUBE_API'
+            doc['recuperacion']['estado'] = 'RECUPERADO'
+            recuperadas += bool(doc['cuerpo_extraido'])
+            publicaciones.append(doc)
+            continue
+        doc['metodo_recuperacion'] = 'SNIPPET_BRAVE'
         if max_solicitudes is None or intentadas < max_solicitudes:
             intentadas += 1
             try:
@@ -80,6 +90,7 @@ def enriquecer(candidatos, *, obtener_html=None, max_solicitudes=None):
                 if texto:
                     doc['cuerpo_extraido'] = texto
                     doc['recuperacion']['fuente_texto'] = 'HTML_BODY'
+                    doc['metodo_recuperacion'] = 'HTML_SCRAPING'
                     recuperadas += 1
             except ErrorRecuperacion as exc:
                 doc['recuperacion'].update(estado='ERROR', error={'codigo': exc.codigo, 'mensaje': str(exc)})
