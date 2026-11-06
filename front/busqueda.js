@@ -65,10 +65,12 @@
         let descartadas = datos.total_publicaciones_descartadas ?? datos.publicaciones_descartadas?.length ?? 0;
         const scorePublicacion = p => p.score_emm ?? p.evaluacion_contextual?.score_emm ?? 0;
         const ordenadas = [...datos.publicaciones].sort((a, b) => scorePublicacion(b) - scorePublicacion(a));
+        const descartadasDetalle = [...(datos.publicaciones_descartadas || [])];
         for (const publicacion of ordenadas) {
             const score = publicacion.score_emm ?? publicacion.evaluacion_contextual?.score_emm ?? 0;
             if (typeof score !== "number" || !Number.isFinite(score) || score < 0.5) {
                 descartadas += 1;
+                descartadasDetalle.push(publicacion);
                 continue;
             }
             const articulo = document.createElement("article");
@@ -76,6 +78,7 @@
             texto(articulo, "h3", publicacion.titulo);
             texto(articulo, "p", `${publicacion.origen} · ${publicacion.fecha || publicacion.fecha_indice || publicacion.youtube?.publicado_en || "Fecha no disponible"}`);
             texto(articulo, "p", publicacion.resumen || publicacion.descripcion || "Sin descripción");
+            texto(articulo, "p", `Score EMM: ${score.toFixed(1)}`);
             if (publicacion.simulado ?? datos.simulado) {
                 texto(articulo, "p", "URL ficticia (sin navegación): " + publicacion.url);
                 panel.append(articulo);
@@ -90,7 +93,6 @@
             }
             if (publicacion.evaluacion_contextual) {
                 const evaluacion = publicacion.evaluacion_contextual;
-                texto(articulo, "p", `Score EMM: ${evaluacion.score_emm}`);
                 texto(articulo, "p", evaluacion.justificacion);
                 texto(articulo, "p", `Recuperación: ${publicacion.recuperacion?.estado || "Sin información"}`);
                 const detalle = document.createElement("details");
@@ -99,6 +101,19 @@
                 articulo.append(detalle);
             }
             panel.append(articulo);
+        }
+        if (descartadasDetalle.length) {
+            const detalleDescartes = document.createElement("details");
+            texto(detalleDescartes, "summary", "Auditar publicaciones descartadas");
+            for (const publicacion of descartadasDetalle) {
+                const score = scorePublicacion(publicacion);
+                const valor = typeof score === "number" && Number.isFinite(score) ? score.toFixed(1) : "no disponible";
+                texto(detalleDescartes, "p", `Score EMM: ${valor} — ${publicacion.titulo || publicacion.url || "Sin título"}`);
+                if (publicacion.evaluacion_contextual?.justificacion) {
+                    texto(detalleDescartes, "p", publicacion.evaluacion_contextual.justificacion);
+                }
+            }
+            panel.append(detalleDescartes);
         }
         texto(panel, "small", `[${descartadas}] publicaciones descartadas por no cumplir el Marco EMM.`);
     }

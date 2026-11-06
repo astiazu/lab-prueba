@@ -45,16 +45,17 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     assert.equal(panel.children[0].textContent, 'Resultados de descubrimiento');
     assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[2].textContent, '<script>texto</script>');
     assert.equal(panel.children[4].textContent, 'Orígenes: example.com: 1');
-    assert.ok(panel.children.filter(e => e.className === 'pub').at(-1).children[3].textContent.startsWith('URL ficticia'));
+    assert.equal(panel.children.filter(e => e.className === 'pub')[0].children[3].textContent, 'Score EMM: 0.6');
+    assert.ok(panel.children.filter(e => e.className === 'pub').at(-1).children[4].textContent.startsWith('URL ficticia'));
     respuesta.publicaciones[0].simulado = false;
     await elementos.form.events.submit({ preventDefault() {} });
-    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[3].textContent, 'Ver publicación');
-    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[3].href, 'https://example.com/demo');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[4].textContent, 'Ver publicación');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[4].href, 'https://example.com/demo');
     respuesta.publicaciones[0].evaluacion_contextual = { score_emm: 0.6, justificacion: 'Encontrado: entidad y contexto. Falta: territorio.' };
     respuesta.publicaciones[0].recuperacion = { estado: 'RECUPERADO' };
     respuesta.publicaciones[0].cuerpo_extraido = '<script>contenido como texto</script>';
     await elementos.form.events.submit({ preventDefault() {} });
-    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[4].textContent, 'Score EMM: 0.6');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[3].textContent, 'Score EMM: 0.6');
     assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children.at(-1).children[1].textContent, '<script>contenido como texto</script>');
     respuesta.publicaciones.push({ score_emm: 0.4 }, { score_emm: 0 }, { score_emm: 0.49 });
     await elementos.form.events.submit({ preventDefault() {} });
@@ -74,7 +75,7 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     assert.equal(panel.children.filter(e => e.className === 'pub').length, 1);
     assert.equal(panel.children.at(-1).textContent, '[7] publicaciones descartadas por no cumplir el Marco EMM.');
     respuesta.publicaciones = [
-        { ...respuesta.publicaciones[0], titulo: 'Media', score_emm: 0.8 },
+        { ...respuesta.publicaciones[0], titulo: 'Media', score_emm: 0.7 },
         { ...respuesta.publicaciones[0], titulo: 'Alta', score_emm: 1.0 },
         { ...respuesta.publicaciones[0], titulo: 'Baja', score_emm: 0.4 },
     ];
@@ -84,6 +85,11 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     assert.equal(respuesta.publicaciones[0].titulo, 'Media');
     assert.equal(panel.children.at(-1).textContent, '[8] publicaciones descartadas por no cumplir el Marco EMM.');
     assert.deepEqual(JSON.parse(peticion.opciones.body).territorios_genericos, ['c']);
+    assert.equal(panel.children.filter(e => e.className === 'pub')[1].children[3].textContent, 'Score EMM: 0.7');
+    respuesta.publicaciones_descartadas = [{ titulo: 'Solo territorio', score_emm: 0.3, evaluacion_contextual: { justificacion: 'Falta entidad y contexto.' } }];
+    await elementos.form.events.submit({ preventDefault() {} });
+    const auditoria = panel.children.find(e => e.children[0]?.textContent === 'Auditar publicaciones descartadas');
+    assert.ok(auditoria.children.some(e => e.textContent.includes('Score EMM: 0.3 — Solo territorio')));
     elementos['territorios-genericos'].events.input();
     assert.equal(boton.disabled, true);
     elementos.marco.events.input();

@@ -148,7 +148,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     aceptadas = [p for p in publicaciones if p['score_emm'] >= 0.5]
     resultado = {
         'modo': 'BRAVE_SEARCH_REAL', 'simulado': False, 'proveedor': 'BRAVE_WEB',
-        'version': 'LAB_EMM_SUPERTEXTO_V5', 'nueva_busqueda': True,
+        'version': 'LAB_EMM_ACUMULATIVO_V6', 'nueva_busqueda': True,
         'fecha_ejecucion_utc': ahora.isoformat(), 'marco': texto, 'periodo': periodo,
         'territorios_genericos': list(marco.territorios_genericos),
         'plan_consultas': plan_consultas, 'paginas_brave_maximas': paginas_brave,

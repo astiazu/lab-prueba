@@ -133,57 +133,60 @@ El borrador de red añade `www.googleapis.com`; requiere revisar, guardar y
 publicar la configuración del entorno. También se necesita habilitar YouTube
 Data API v3 para la clave y disponer de cuota. El código no configura esos permisos.
 
-## Paso 4: Súper-Texto y nueva retención EMM
+## Paso 4: Súper-Texto y score acumulativo
 
 El evaluador concatena todo el texto disponible: `titulo`, `descripcion`,
 `cuerpo_extraido`, `metadatos_youtube.titulo` y `metadatos_youtube.descripcion`.
 `fuentes_texto_evaluadas` identifica las fuentes utilizadas. Las dimensiones se
 buscan en este Súper-Texto sin distinguir mayúsculas, conservando los acentos.
-No se penaliza la ausencia en el título ni en los primeros 500 caracteres.
+No se exige la primera entidad ni presencia en el título o al comienzo del cuerpo.
 
-La entidad principal es la primera alternativa de Entidades del Marco y debe
-aparecer completa. Una coincidencia parcial o solo con otra alternativa no basta.
-Contextos y territorios son alternativas: basta una de cada dimensión. No se
-usan diccionarios temáticos, profesiones, personas o lugares predefinidos.
+El score suma una sola contribución por dimensión, independientemente del número
+de alternativas o menciones:
 
-Escala:
+- Alguna entidad: +0.4.
+- Algún contexto: +0.3.
+- Algún territorio: +0.3.
 
-- 0.0: no aparece la entidad principal.
-- 0.2: aparece solo la entidad principal, sin contexto ni territorio.
-- 0.4: entidad principal y una dimensión (contexto o territorio).
-- 0.8: entidad principal, contexto y territorio.
-- 1.0: las tres dimensiones y al menos dos menciones de la entidad principal.
+Máximo 1.0, redondeado a un decimal. Entidad sola obtiene 0.4; contexto y territorio
+sin entidad obtienen 0.6; entidad y una dimensión obtienen 0.7; las tres dimensiones
+obtienen 1.0. No hay bonificación por repetición ni penalización por territorio
+genérico. Se acepta score >= 0.5; los valores inferiores se conservan en descartadas.
 
-Para contar menciones se eliminan campos de texto idénticos normalizados: copiar
-la misma descripción al cuerpo o a metadatos no genera alta densidad por sí solo.
-Se guardan `score_base`, `penalizaciones`, `detalles`, los matches y la justificación.
+`componentes_score` permite auditar la suma por dimensión. Se conservan matches,
+evidencias, menciones, fuentes, `score_base`, `penalizaciones` (vacío para esta
+versión) y justificación. `entidad_principal_presente` es solo información de
+trazabilidad: no impone ningún filtro. Se evita duplicar menciones cuando el mismo
+campo se copia literalmente, sin alterar la suma fija por dimensiones.
 
-**El umbral sigue siendo 0.5.** Por lo tanto, aunque entidad más una dimensión
-cumple la coocurrencia mínima, su score 0.4 se conserva en descartadas; el principal
-recibe las coincidencias de 0.8/1.0 que no tengan penalización territorial.
+## Territorios específicos e inferencia de los generales
 
-## Territorios genéricos declarados por Marco
+El formulario permite declarar territorios genéricos separados por comas. La API
+acepta `territorios_genericos` como lista de alternativas que ya existan en el
+Marco. Los demás territorios se consideran específicos. Esta declaración define
+la relación solicitada: si aparece uno específico, se asumen presentes todos los
+generales declarados en ese mismo Marco, aunque no figuren textualmente.
 
-El formulario permite introducir territorios genéricos separados por comas.
-La API acepta `territorios_genericos` como lista opcional de alternativas que ya
-existan en el territorio del Marco; cualquier valor ajeno produce un error JSON.
-Por ejemplo, para `Elemento; Proceso; Localidad, Región Amplia`, se puede declarar
-`"territorios_genericos": ["Región Amplia"]`.
+Ejemplo: `Elemento; Proceso; Localidad, Región Amplia, País`, con
+`"territorios_genericos": ["Región Amplia", "País"]`. Si aparece `Localidad`, se
+registran también `Región Amplia` y `País` como inferidos. Esto aporta **solo 0.3**
+para territorio, no puntos por cada lugar. No se infieren otros territorios
+específicos ni lugares externos al Marco, y la inferencia no funciona a la inversa.
 
-Todos los territorios no declarados genéricos son específicos. No se infiere
-esta categoría por cantidad de palabras ni mediante un listado de países: un
-territorio específico puede tener una sola palabra. Si coincide un territorio
-genérico pero ninguno específico, el score máximo es 0.4. La regla se registra
-como `solo_territorio_generico`, con todos los encontrados y faltantes en
-`detalles.territorios`. Sin declaración no se aplica una clasificación implícita.
+`detalles.territorios` diferencia `encontrados_textuales`, `inferidos`,
+`no_encontrados_textuales` y los encontrados efectivos. La evidencia inferida
+indica `inferencia_por_territorio_especifico`, sus territorios de origen y cero
+menciones textuales. Las palabras no vistas no se marcan como vistas.
+Sin una declaración explícita de generales, no se inventa una jerarquía geográfica
+ni se aplica una lista fija de lugares o una clasificación por cantidad de palabras.
 
-El JSON conserva la declaración utilizada. Si cambia la política de territorios,
-el histórico del mismo Marco/plan/período se vuelve a evaluar con la nueva política,
+El histórico del mismo Marco/plan/período se reevalúa con la declaración actual,
 sin perder publicaciones ni modificar los snapshots previos.
 
 ## Visualización
 
-El panel ordena de mayor a menor score y oculta publicaciones con score inferior a 0.5 y muestra al final
+El panel muestra siempre `Score EMM: 0.7` (con el valor correspondiente),
+ordena de mayor a menor score y oculta publicaciones con score inferior a 0.5 y muestra al final
 `[X] publicaciones descartadas por no cumplir el Marco EMM.` Los scores ausentes
 o inválidos se tratan como no evaluados y se ocultan también. Los contadores de
 URLs y orígenes describen el inventario completo, no solo las filas visibles.
@@ -193,7 +196,8 @@ scores >= 0.5. Los demás se guardan, también ordenados, en
 `total_publicaciones_aceptadas` y `total_publicaciones_descartadas` acompañan ambos
 arrays. `total_urls_unicas` y `origenes` siguen describiendo todo el inventario.
 El contador visual suma los descartes del servidor y cualquier descarte local de
-respuestas antiguas. Al reutilizar el histórico se recuperan **ambos** arrays para
+respuestas antiguas. Un desplegable permite auditar título, score y justificación de las descartadas.
+Al reutilizar el histórico se recuperan **ambos** arrays para
 reevaluarlos: no se pierde una publicación por un descarte de una ejecución previa.
 
 Al iniciar con `python3 run.py`, la terminal muestra una línea `[EMM] i/total
@@ -206,7 +210,7 @@ score_emm=...` por publicación después de recuperar el lote.
 el título, luego el cuerpo y por último la descripción. `ubicaciones_entidad`
 conserva todas las ubicaciones encontradas. La descripción de Brave copiada a
 `cuerpo_extraido` como respaldo se atribuye a `DESCRIPCION`, no a un HTML descargado.
-Esta trazabilidad identifica la entidad principal completa. Incluye también
+Esta trazabilidad identifica cualquiera de las entidades completas del Marco. Incluye también
 `METADATOS_YOUTUBE_TITULO` y `METADATOS_YOUTUBE_DESCRIPCION` si corresponde.
 
 ## Diagnóstico de YouTube

@@ -109,7 +109,7 @@ class RecuperacionTests(unittest.TestCase):
         self.assertEqual(len(resultado['publicaciones']), 103)
         self.assertEqual(len(logs.output), 103)
         self.assertIn('103/103', logs.output[-1])
-        self.assertTrue(all(p['score_emm'] == 0.8 for p in resultado['publicaciones']))
+        self.assertTrue(all(p['score_emm'] == 1.0 for p in resultado['publicaciones']))
         self.assertTrue(all(p['evaluacion_contextual']['detalles'] for p in resultado['publicaciones']))
 
     def test_end_to_end_retains_zero_score_and_download_failure(self):
@@ -127,7 +127,7 @@ class RecuperacionTests(unittest.TestCase):
             resultado = motor.ejecutar_busqueda(payload, brave_consultar=proveedor, documental_obtener_html=obtener)
         self.assertEqual(resultado['total_urls_unicas'], 3)
         self.assertEqual(len(resultado['publicaciones']), 1)
-        self.assertEqual(resultado['publicaciones'][0]['score_emm'], 0.8)
+        self.assertEqual(resultado['publicaciones'][0]['score_emm'], 1.0)
         self.assertEqual([p['evaluacion_contextual']['score_emm'] for p in resultado['publicaciones_descartadas']], [0.0, 0.0])
         self.assertEqual(resultado['publicaciones_descartadas'][1]['recuperacion']['estado'], 'ERROR')
         self.assertEqual(resultado['recuperacion_documental']['documentos_con_texto'], 2)

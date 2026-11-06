@@ -69,29 +69,34 @@ def evaluar_publicacion(marco, publicacion):
     principal = marco.entidades[0]
     principal_presente = principal in matches['entidades']
     cantidad_principal = _menciones(_tokens(principal), textos_unicos)
-    contexto, territorio = matches['contextos'], matches['territorios']
-    if not principal_presente:
-        score = 0.0
-    elif contexto and territorio:
-        score = 1.0 if cantidad_principal >= 2 else 0.8
-    elif contexto or territorio:
-        score = 0.4
-    else:
-        score = 0.2
-    score_base = score
+    contexto = matches['contextos']
+    territorios_textuales = list(matches['territorios'])
     genericos = list(marco.territorios_genericos)
     especificos = [v for v in marco.territorios if v not in genericos]
-    genericos_encontrados = [v for v in territorio if v in genericos]
-    especificos_encontrados = [v for v in territorio if v in especificos]
+    genericos_encontrados = [v for v in territorios_textuales if v in genericos]
+    especificos_encontrados = [v for v in territorios_textuales if v in especificos]
+    inferidos = [v for v in genericos if v not in territorios_textuales] if especificos_encontrados else []
+    territorio = [v for v in marco.territorios if v in territorios_textuales or v in inferidos]
+    matches['territorios'] = territorio
+    detalle_territorio = detalles['territorios']
+    detalle_territorio.update(presente=bool(territorio), encontrados=territorio,
+                             encontrados_textuales=territorios_textuales,
+                             no_encontrados_textuales=list(detalle_territorio['no_encontrados']),
+                             no_encontrados=[v for v in marco.territorios if v not in territorio],
+                             inferidos=inferidos, genericos=genericos, especificos=especificos,
+                             genericos_encontrados=genericos_encontrados,
+                             especificos_encontrados=especificos_encontrados,
+                             criterio_especificidad='DECLARACION_DEL_MARCO')
+    for evidencia in detalle_territorio['evidencia']:
+        if evidencia['alternativa'] in inferidos:
+            evidencia.update(metodo='inferencia_por_territorio_especifico',
+                             inferido_desde=list(especificos_encontrados))
+    componentes = {'entidad': 0.4 if matches['entidades'] else 0.0,
+                   'contexto': 0.3 if contexto else 0.0,
+                   'territorio': 0.3 if territorio else 0.0}
+    score = round(sum(componentes.values()), 1)
+    score_base = score
     penalizaciones = []
-    if principal_presente and genericos_encontrados and not especificos_encontrados:
-        score = min(score, 0.4)
-        penalizaciones.append({'codigo': 'solo_territorio_generico', 'limite': 0.4,
-                                'motivo': 'Solo coinciden territorios declarados genéricos; falta un territorio específico del Marco.'})
-    detalles['territorios'].update(genericos=genericos, especificos=especificos,
-                                  genericos_encontrados=genericos_encontrados,
-                                  especificos_encontrados=especificos_encontrados,
-                                  criterio_especificidad='DECLARACION_DEL_MARCO')
     detalles['entidades'].update(principal=principal, principal_presente=principal_presente,
                                 menciones_principal=cantidad_principal)
     ubicaciones = []
@@ -101,11 +106,11 @@ def evaluar_publicacion(marco, publicacion):
         if campo == 'CUERPO_EXTRAIDO' and (publicacion.get('recuperacion') or {}).get('fuente_texto') == 'DESCRIPCION_BRAVE':
             continue
         for nombre, texto in fuentes:
-            if nombre == campo and _menciones(_tokens(principal), [_tokens(texto)]):
+            if nombre == campo and any(_menciones(_tokens(e), [_tokens(texto)]) for e in marco.entidades):
                 ubicaciones.append(etiquetas[campo])
     faltantes = []
-    if not principal_presente:
-        faltantes.append('entidad principal')
+    if not matches['entidades']:
+        faltantes.append('entidad')
     if not contexto:
         faltantes.append('contexto')
     if not territorio:
@@ -115,13 +120,14 @@ def evaluar_publicacion(marco, publicacion):
                  if matches[dimension]]
     justificacion = 'Encontrado: ' + ('; '.join(presentes) or 'ninguna dimensión') + '. '
     justificacion += 'Falta: ' + (', '.join(faltantes) or 'ninguna dimensión') + '.'
-    if penalizaciones:
-        justificacion += ' ' + ' '.join(p['motivo'] for p in penalizaciones)
+    if inferidos:
+        justificacion += ' Territorios inferidos por declaración del Marco: ' + ', '.join(inferidos) + '.'
     return {'score_emm': score, 'score_base': score_base, 'penalizaciones': penalizaciones,
             'detalles': detalles, 'match_entidad': matches['entidades'],
             'match_contexto': contexto, 'match_territorio': territorio,
             'entidad_principal_presente': principal_presente,
-            'coocurrencia': principal_presente and bool(contexto or territorio),
+            'coocurrencia': sum(bool(v) for v in (matches['entidades'], contexto, territorio)) >= 2,
+            'componentes_score': componentes,
             'menciones_por_dimension': menciones, 'fuentes_texto_evaluadas': [n for n, _ in fuentes],
             'justificacion': justificacion,
             'ubicacion_entidad': ubicaciones[0] if ubicaciones else None, 'ubicaciones_entidad': ubicaciones}
