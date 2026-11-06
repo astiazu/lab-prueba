@@ -2,6 +2,7 @@
 from collections import Counter, deque
 from datetime import date, datetime, timezone
 import json
+import logging
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -90,9 +91,9 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     max_brave = payload.get('max_brave', 50)
     if type(max_brave) is not int or not 1 <= max_brave <= 50:
         raise ValueError('max_brave fuera de rango (1..50)')
-    max_documentos = payload.get('max_documentos_enriquecer', 8)
-    if type(max_documentos) is not int or not 0 <= max_documentos <= 100:
-        raise ValueError('max_documentos_enriquecer fuera de rango (0..100)')
+    max_documentos = payload.get('max_documentos_enriquecer')
+    if max_documentos is not None and (type(max_documentos) is not int or not 0 <= max_documentos <= 1000):
+        raise ValueError('max_documentos_enriquecer fuera de rango (0..1000 o null para todas)')
     clave = brave.clave_brave()
     if brave_consultar is None and not clave:
         raise brave.BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY o BRAVE_SEARCH_API_KEY en el entorno o en .env.', 503)
@@ -152,8 +153,10 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     recuperacion = enriquecer(list(urls.values()), obtener_html=documental_obtener_html,
                              max_solicitudes=max_documentos)
     publicaciones = recuperacion.pop('publicaciones')
-    for publicacion in publicaciones:
-        publicacion['evaluacion_contextual'] = evaluar_publicacion(marco, publicacion)
+    for indice, publicacion in enumerate(publicaciones, 1):
+        publicacion['evaluacion_contextual'] = evaluar_publicacion(texto, publicacion)
+        publicacion['score_emm'] = publicacion['evaluacion_contextual']['score_emm']
+        logging.getLogger(__name__).info('[EMM] %s/%s score_emm=%.1f %s', indice, len(publicaciones), publicacion['score_emm'], publicacion.get('titulo', ''))
         if publicacion['recuperacion']['estado'] == 'ERROR':
             error = publicacion['recuperacion']['error']
             errores.append({'proveedor': 'RECUPERACION_DOCUMENTAL', 'url': publicacion['url'],

@@ -45,8 +45,9 @@ class RecuperacionTests(unittest.TestCase):
     def test_body_main_cleanup_and_limit(self):
         html = '<head><title>Fuera</title></head><body><nav>Menú</nav><div>Fuera de main</div><main><h1>Título</h1><p>Texto &amp; <b>detalle</b>.</p><script>script</script><style>style</style><div hidden>oculto</div><footer>Pie</footer></main></body>'
         texto = recuperacion.extraer_cuerpo(html)
-        self.assertEqual(texto, 'Título Texto & detalle.')
+        self.assertEqual(texto, 'Menú Fuera de main Título Texto & detalle . Pie')
         self.assertEqual(recuperacion.extraer_cuerpo('<body><p>Texto sin main</p></body>'), 'Texto sin main')
+        self.assertEqual(recuperacion.extraer_cuerpo('<body><div style="display:none"><p style="display:none">oculto</p></div>visible</body>'), 'visible')
         self.assertEqual(len(recuperacion.extraer_cuerpo('<body>' + 'a' * 6000 + '</body>')), 5000)
 
     def test_real_http_request_encoding_and_no_api_header(self):
@@ -82,6 +83,34 @@ class RecuperacionTests(unittest.TestCase):
         self.assertEqual([p['recuperacion']['estado'] for p in resultado['publicaciones']], ['ERROR', 'PENDIENTE'])
         self.assertEqual(resultado['pendientes'], 1)
         self.assertNotIn('cuerpo_extraido', candidatos[0])
+
+    def test_description_fallback_and_103_candidates(self):
+        candidatos = [{'url': f'https://example.org/{i}', 'descripcion': 'Entidad Contexto Territorio' + 'x' * 6000} for i in range(103)]
+        def falla(url):
+            raise recuperacion.ErrorRecuperacion('error_http', 'El documento devolvió HTTP 403.')
+        resultado = recuperacion.enriquecer(candidatos, obtener_html=falla)
+        self.assertEqual(resultado['solicitudes_intentadas'], 103)
+        self.assertEqual(len(resultado['publicaciones']), 103)
+        self.assertEqual(resultado['pendientes'], 0)
+        for p in resultado['publicaciones']:
+            self.assertEqual(p['cuerpo_extraido'], p['descripcion'][:5000])
+            self.assertEqual(p['recuperacion']['estado'], 'ERROR')
+            self.assertEqual(p['recuperacion']['fuente_texto'], 'DESCRIPCION_BRAVE')
+
+    def test_orchestrator_scores_all_103_and_logs_each_one(self):
+        payload = {'marco': 'Entidad; Contexto; Territorio', 'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'}, 'max_brave': 1}
+        def proveedor(*args):
+            return {'web': {'results': [{'url': f'https://example.org/{i}', 'title': 'Entidad', 'description': 'Contexto Territorio'} for i in range(103)]}}
+        def falla(url):
+            raise recuperacion.ErrorRecuperacion('error_http', 'HTTP 403')
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'), self.assertLogs(motor.__name__, level='INFO') as logs:
+            resultado = motor.ejecutar_busqueda(payload, brave_consultar=proveedor, documental_obtener_html=falla)
+        self.assertEqual(resultado['recuperacion_documental']['solicitudes_intentadas'], 103)
+        self.assertEqual(len(resultado['publicaciones']), 103)
+        self.assertEqual(len(logs.output), 103)
+        self.assertIn('103/103', logs.output[-1])
+        self.assertTrue(all(p['score_emm'] == 1.0 for p in resultado['publicaciones']))
+        self.assertTrue(all(p['evaluacion_contextual']['detalles'] for p in resultado['publicaciones']))
 
     def test_end_to_end_retains_zero_score_and_download_failure(self):
         payload = {'marco': 'Entidad Alfa; Contexto Beta; Territorio Gamma',

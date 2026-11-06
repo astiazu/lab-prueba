@@ -57,41 +57,45 @@ clave ya cargada y no vacía, reiniciar el servidor para aplicar la nueva.
 ## Paso 3: recuperación documental
 
 `motor_v2/recuperacion_documental_enriquecida.py` descarga HTML con `urllib` y
-extrae texto con `HTMLParser`, sin dependencias adicionales. Usa texto dentro de
-`main` o `article` si está disponible y, en otro caso, el `body`. Omite elementos
-estructurales de navegación, scripts, estilos y elementos ocultos; no utiliza
-palabras o categorías temáticas para seleccionar contenido. El campo
+limpia el `body` con BeautifulSoup (`beautifulsoup4` en `requirements.txt`).
+Extrae el texto del body completo, excluyendo scripts, estilos, plantillas y
+elementos ocultos por atributos o estilos inline. No clasifica vocabulario o
+temas, no ejecuta JavaScript y no calcula estilos de hojas CSS externas.
 `cuerpo_extraido` siempre existe y contiene hasta 5000 caracteres.
 
-Cada publicación incluye `recuperacion.estado` (`RECUPERADO`, `SIN_TEXTO`,
-`ERROR` o `PENDIENTE`) y, cuando corresponde, un error JSON. Una descarga fallida
-no elimina la publicación ni impide evaluar su título y descripción.
+Ante HTTP 403, fallos de red, tipos no HTML o un body sin texto, se usa la
+`descripcion` original de Brave (también limitada a 5000 caracteres). La
+publicación conserva el estado y error de recuperación; no se marca como HTML
+recuperado un texto proveniente de la descripción. `recuperacion.fuente_texto`
+indica `HTML_BODY`, `DESCRIPCION_BRAVE` o `SIN_TEXTO`.
 
-`max_documentos_enriquecer` admite de 0 a 100 intentos, por defecto 8 por búsqueda.
-El presupuesto deja documentos pendientes de descarga, pero todos se conservan
-y se evalúan. Cada petición usa un timeout de 10 segundos y limita el HTML a
-2 MiB. No se ejecuta JavaScript ni se procesan PDF u otros tipos no HTML. Se
-requiere acceso de red a los sitios de las publicaciones; la configuración de
-red restringida puede bloquear algunos y el fallo se registra por documento.
-No se envía la cabecera de autenticación de Brave a las publicaciones.
+Por defecto se intenta descargar **todas** las publicaciones, incluidas 103 o más.
+`max_documentos_enriquecer` permite un límite explícito de 0 a 1000 intentos;
+omitirlo o pasar `null` procesa todas. Las pendientes conservan su descripción y
+se evalúan igualmente. Las solicitudes son secuenciales, con timeout de 10
+segundos por documento y límite de 2 MiB por HTML: lotes grandes pueden tardar.
+La red del entorno debe permitir los dominios de las publicaciones. Nunca se
+envía la cabecera de autenticación de Brave a esos sitios.
 
-## Paso 4: evaluación contextual de base
+## Paso 4: evaluación EMM exacta
 
-`evaluar_publicacion(marco, publicacion)` compara exclusivamente las dimensiones
-del Marco contra título, descripción y cuerpo disponible. Normaliza mayúsculas
-y acentos, exige los términos de cada expresión y permite prefijos comunes y
-similitudes básicas de tokens largos. No contiene diccionarios temáticos,
-clasificaciones de contenido ni reglas específicas de entidades. La comparación
-es léxica y aproximada: no resuelve negaciones ni acredita relaciones semánticas.
+`evaluar_publicacion(marco, publicacion)` acepta el Marco como string separado
+por punto y coma, o el contrato `Marco` para compatibilidad. Compara únicamente
+`titulo` y `cuerpo_extraido`. Las descripciones participan a través del fallback
+de recuperación, sin introducir una tercera fuente implícita.
 
-La publicación incluye `evaluacion_contextual` con `match_entidad`,
-`match_contexto`, `match_territorio`, `score_emm` y `justificacion`:
+Se comparan palabras completas sin distinguir mayúsculas; se conservan acentos.
+No se usan raíces, similitudes, listas temáticas ni categorías. Para que coincida
+una alternativa de varias palabras, todas deben aparecer en el texto (sin
+exigir adyacencia u orden). Una alternativa completa por dimensión es suficiente.
 
-- Sin entidad: 0.0, aunque aparezcan otras dimensiones.
-- Con entidad: 0.3 (también si solo añade territorio).
-- Con entidad y contexto: 0.6.
-- Con entidad, contexto y territorio: 1.0.
+El score es 0.0 sin entidad, 0.3 con entidad, 0.6 con entidad y contexto y 1.0
+con entidad, contexto y territorio. Entidad más territorio sin contexto da 0.3.
+Se guarda en `publicacion.score_emm` y en `evaluacion_contextual.score_emm`.
+`evaluacion_contextual.detalles` incluye por dimensión las alternativas y palabras
+encontradas y no encontradas; se conservan los matches y la justificación para
+compatibilidad con el panel. No se descarta ni reordena ninguna publicación.
 
-Una coincidencia alternativa por dimensión es suficiente para este cálculo.
-Los scores no descartan ni reordenan publicaciones. El panel muestra el score,
-la justificación, el estado de recuperación y el cuerpo desplegable para auditar.
+Al iniciar con `python3 run.py`, la terminal muestra una línea `[EMM] i/total
+score_emm=...` por publicación después de recuperar el lote. Las pruebas de lotes
+103 usan respuestas controladas y no consumen la API de Brave ni los sitios web.

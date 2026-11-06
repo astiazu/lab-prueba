@@ -16,15 +16,22 @@ class EvaluadorTests(unittest.TestCase):
                 self.assertEqual(resultado['score_emm'], esperado)
                 self.assertIn('Falta:', resultado['justificacion'])
 
-    def test_normalization_roots_similarity_and_all_fields(self):
-        marco = Marco.desde_input('Organización Delta; Investigación; Región Central')
-        publicacion = {'titulo': 'ORGANIZACIONES DELTA', 'descripcion': 'Investigacion',
-                       'cuerpo_extraido': 'region central'}
-        resultado = evaluar_publicacion(marco, publicacion)
+    def test_exact_words_casefold_and_string_marco(self):
+        resultado = evaluar_publicacion('Organización Delta; Investigación; Región Central', {
+            'titulo': 'ORGANIZACIÓN DELTA', 'cuerpo_extraido': 'INVESTIGACIÓN región central'})
         self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['match_entidad'], ['Organización Delta'])
-        marco = Marco.desde_input('Laboratorio; Exploración; Territorio')
-        self.assertEqual(evaluar_publicacion(marco, {'titulo': 'Laboratprio'})['score_emm'], 0.3)
+        self.assertEqual(resultado['detalles']['entidades']['palabras_encontradas'], ['organización', 'delta'])
+        self.assertEqual(resultado['detalles']['territorios']['no_encontrados'], [])
+        for titulo in ('Organizaciones Delta', 'Organizacion Delta', 'Organizacióm Delta'):
+            with self.subTest(titulo=titulo):
+                self.assertEqual(evaluar_publicacion('Organización Delta; Investigación; Región Central', {'titulo': titulo})['score_emm'], 0.0)
+
+    def test_description_is_used_only_via_recovery_fallback(self):
+        marco = 'Entidad; Contexto; Territorio'
+        self.assertEqual(evaluar_publicacion(marco, {'descripcion': 'Entidad Contexto Territorio'})['score_emm'], 0.0)
+        parcial = evaluar_publicacion('Entidad Alfa; Contexto; Territorio', {'titulo': 'Entidad'})
+        self.assertEqual(parcial['detalles']['entidades']['palabras_encontradas'], ['entidad'])
+        self.assertEqual(parcial['detalles']['entidades']['palabras_no_encontradas'], ['alfa'])
 
     def test_token_boundaries_full_names_and_alternatives(self):
         marco = Marco.desde_input('Ana Sol, Proyecto Azul; Contexto; Zona')
@@ -35,7 +42,7 @@ class EvaluadorTests(unittest.TestCase):
         self.assertEqual(resultado['score_emm'], 0.3)
 
     def test_only_marco_changes_interpretation(self):
-        publicacion = {'titulo': 'Materiales Nébula', 'descripcion': 'Diseños Delta', 'cuerpo_extraido': 'Región Prisma'}
+        publicacion = {'titulo': 'Materiales Nébula', 'cuerpo_extraido': 'Diseños Delta Región Prisma'}
         completo = Marco.desde_input('Materiales Nébula; Diseños Delta; Región Prisma')
         ajeno = Marco.desde_input('Organización Distinta; Otra Actividad; Otra Ubicación')
         self.assertEqual(evaluar_publicacion(completo, publicacion)['score_emm'], 1.0)

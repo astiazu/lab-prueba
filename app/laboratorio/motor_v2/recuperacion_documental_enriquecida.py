@@ -1,6 +1,6 @@
 """Recuperación HTTP y extracción estructural del body, sin reglas de dominio."""
 import re
-from html.parser import HTMLParser
+from bs4 import BeautifulSoup
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -49,77 +49,40 @@ def descargar_html(url):
         raise ErrorRecuperacion('codificacion_invalida', 'El HTML declara una codificación desconocida.') from None
 
 
-class _BodyHTML(HTMLParser):
-    VACIOS = frozenset(('area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'))
-    OMITIR = frozenset(('script', 'style', 'noscript', 'template', 'nav', 'header', 'footer', 'aside', 'form', 'svg'))
-    BLOQUES = frozenset(('p', 'div', 'section', 'article', 'main', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'br', 'table', 'tr', 'td', 'blockquote'))
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.pila = []
-        self.textos = {'body': [], 'main': [], 'article': []}
-
-    def _agregar(self, texto):
-        etiquetas = [tag for tag, _ in self.pila]
-        if 'body' not in etiquetas or any(oculto for _, oculto in self.pila):
-            return
-        self.textos['body'].append(texto)
-        for region in ('main', 'article'):
-            if region in etiquetas:
-                self.textos[region].append(texto)
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        if tag not in self.VACIOS:
-            oculto = tag in self.OMITIR or 'hidden' in attrs or attrs.get('aria-hidden', '').lower() == 'true'
-            self.pila.append((tag, oculto))
-        if tag in self.BLOQUES:
-            self._agregar(' ')
-
-    def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
-        if tag not in self.VACIOS:
-            self.handle_endtag(tag)
-
-    def handle_endtag(self, tag):
-        if tag in self.BLOQUES:
-            self._agregar(' ')
-        for i in range(len(self.pila) - 1, -1, -1):
-            if self.pila[i][0] == tag:
-                del self.pila[i:]
-                break
-
-    def handle_data(self, data):
-        self._agregar(data)
-
-
 def extraer_cuerpo(html):
-    parser = _BodyHTML()
-    parser.feed(html)
-    parser.close()
-    # Prioridad estructural; nunca se interpreta el tema o vocabulario del texto.
-    for region in ('main', 'article', 'body'):
-        texto = ' '.join(''.join(parser.textos[region]).split())
-        if texto:
-            return texto[:MAX_CARACTERES]
-    return ''
+    sopa = BeautifulSoup(html, 'html.parser')
+    cuerpo = sopa.body
+    if cuerpo is None:
+        return ''
+    for elemento in reversed(cuerpo.select('script, style, noscript, template, svg, [hidden], [aria-hidden="true"]')):
+        elemento.decompose()
+    for elemento in reversed(cuerpo.find_all(style=True)):
+        if re.search(r'(?:display\s*:\s*none|visibility\s*:\s*hidden)', elemento.get('style', ''), re.I):
+            elemento.decompose()
+    # Limpiar solo por estructura HTML; no clasificar vocabulario o temas.
+    texto = ' '.join(cuerpo.get_text(separator=' ', strip=True).split())
+    return texto[:MAX_CARACTERES]
 
 
-def enriquecer(candidatos, *, obtener_html=None, max_solicitudes=8):
+def enriquecer(candidatos, *, obtener_html=None, max_solicitudes=None):
     obtener = obtener_html or descargar_html
     publicaciones, intentadas, recuperadas = [], 0, 0
     for original in candidatos:
         doc = dict(original)
-        doc['cuerpo_extraido'] = ''
-        doc['recuperacion'] = {'estado': 'PENDIENTE', 'error': None}
-        if intentadas < max_solicitudes:
+        descripcion = doc.get('descripcion')
+        doc['cuerpo_extraido'] = descripcion[:MAX_CARACTERES] if isinstance(descripcion, str) else ''
+        doc['recuperacion'] = {'estado': 'PENDIENTE', 'error': None, 'fuente_texto': 'DESCRIPCION_BRAVE' if doc['cuerpo_extraido'] else 'SIN_TEXTO'}
+        if max_solicitudes is None or intentadas < max_solicitudes:
             intentadas += 1
             try:
-                doc['cuerpo_extraido'] = extraer_cuerpo(obtener(doc.get('url')))
-                doc['recuperacion']['estado'] = 'RECUPERADO' if doc['cuerpo_extraido'] else 'SIN_TEXTO'
-                recuperadas += bool(doc['cuerpo_extraido'])
+                texto = extraer_cuerpo(obtener(doc.get('url')))
+                doc['recuperacion']['estado'] = 'RECUPERADO' if texto else 'SIN_TEXTO'
+                if texto:
+                    doc['cuerpo_extraido'] = texto
+                    doc['recuperacion']['fuente_texto'] = 'HTML_BODY'
+                    recuperadas += 1
             except ErrorRecuperacion as exc:
-                doc['recuperacion'] = {'estado': 'ERROR', 'error': {'codigo': exc.codigo, 'mensaje': str(exc)}}
+                doc['recuperacion'].update(estado='ERROR', error={'codigo': exc.codigo, 'mensaje': str(exc)})
         publicaciones.append(doc)
     return {'publicaciones': publicaciones, 'solicitudes_intentadas': intentadas,
             'documentos_con_texto': recuperadas,
