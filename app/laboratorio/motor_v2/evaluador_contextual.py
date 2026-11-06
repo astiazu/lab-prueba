@@ -1,11 +1,8 @@
-"""Termómetro EMM universal con alternativas y partes principales auditables."""
-from math import ceil
+"""EMM sobre todas las fuentes de texto, con territorios genéricos declarados."""
 import re
 import unicodedata
 
 from app.laboratorio.motor_v2.contratos import Marco
-
-VENTANA_ENTIDAD = 12
 
 
 def _tokens(texto):
@@ -13,7 +10,8 @@ def _tokens(texto):
 
 
 def _menciones(terminos, textos):
-    """Contar frases completas no solapadas, sin unir título y cuerpo."""
+    if not terminos:
+        return 0
     cantidad = 0
     for tokens in textos:
         i = 0
@@ -26,115 +24,104 @@ def _menciones(terminos, textos):
     return cantidad
 
 
-def _partes_principales(terminos, textos):
-    # Heurística exclusivamente estructural: longitud, proporción y cercanía.
-    partes = set(t for t in terminos if len(t) >= 4)
-    if not partes:
-        return 0
-    minimo = max(2, ceil(len(partes) * 2 / 3)) if len(partes) > 1 else 1
-    cantidad = 0
-    for tokens in textos:
-        i = 0
-        while i < len(tokens):
-            if tokens[i] not in partes:
-                i += 1
-                continue
-            posiciones = [j for j in range(i, min(i + VENTANA_ENTIDAD, len(tokens))) if tokens[j] in partes]
-            if len({tokens[j] for j in posiciones}) >= minimo:
-                # Consumir solo la primera combinación suficiente, sin solapar.
-                vistos = set()
-                for j in posiciones:
-                    vistos.add(tokens[j])
-                    if len(vistos) >= minimo:
-                        cantidad += 1
-                        i = j + 1
-                        break
-            else:
-                i += 1
-    return cantidad
+def _fuentes(publicacion):
+    fuentes = [(campo.upper(), publicacion.get(campo)) for campo in ('titulo', 'descripcion', 'cuerpo_extraido')]
+    metadatos = publicacion.get('metadatos_youtube')
+    if isinstance(metadatos, dict):
+        fuentes.extend((f'YOUTUBE_{campo.upper()}', metadatos.get(campo)) for campo in ('titulo', 'descripcion'))
+    return [(nombre, texto) for nombre, texto in fuentes if isinstance(texto, str) and texto.strip()]
 
 
 def evaluar_publicacion(marco, publicacion):
     if isinstance(marco, str):
         marco = Marco.desde_input(marco)
-    textos = [_tokens(publicacion.get(campo) or '') for campo in ('titulo', 'cuerpo_extraido')
-              if isinstance(publicacion.get(campo) or '', str)]
-    tokens = {token for texto in textos for token in texto}
+    fuentes = _fuentes(publicacion)
+    supertexto = ' '.join(texto for _, texto in fuentes)
+    secuencia = _tokens(supertexto)
+    tokens = set(secuencia)
+    # No contar como alta densidad la misma descripción copiada literalmente
+    # a cuerpo_extraido o repetida en los metadatos nativos.
+    textos_unicos, vistos = [], set()
+    for _, texto in fuentes:
+        terminos = _tokens(texto)
+        firma = tuple(terminos)
+        if firma not in vistos:
+            vistos.add(firma)
+            textos_unicos.append(terminos)
     detalles, matches, menciones = {}, {}, {}
     for dimension, valores in (('entidades', marco.entidades), ('contextos', marco.contextos), ('territorios', marco.territorios)):
         encontrados, faltantes, palabras, evidencia = [], [], [], []
         for valor in valores:
             terminos = _tokens(valor)
+            cantidad = _menciones(terminos, textos_unicos)
+            presente = bool(_menciones(terminos, [secuencia]))
+            (encontrados if presente else faltantes).append(valor)
+            evidencia.append({'alternativa': valor, 'metodo': 'frase_completa' if presente else 'sin_coincidencia',
+                              'menciones': cantidad})
             for palabra in terminos:
                 if palabra not in palabras:
                     palabras.append(palabra)
-            completas = _menciones(terminos, textos) if terminos else 0
-            cantidad = completas
-            metodo = 'frase_completa'
-            if dimension == 'entidades' and terminos:
-                parciales = _partes_principales(terminos, textos)
-                cantidad = max(completas, parciales)
-                if not completas and parciales:
-                    metodo = 'partes_principales'
-            (encontrados if cantidad else faltantes).append(valor)
-            evidencia.append({'alternativa': valor, 'metodo': metodo if cantidad else 'sin_coincidencia', 'menciones': cantidad})
         detalles[dimension] = {'presente': bool(encontrados), 'encontrados': encontrados, 'no_encontrados': faltantes,
                                'palabras_encontradas': [p for p in palabras if p in tokens],
-                               'palabras_no_encontradas': [p for p in palabras if p not in tokens],
-                               'evidencia': evidencia}
+                               'palabras_no_encontradas': [p for p in palabras if p not in tokens], 'evidencia': evidencia}
         matches[dimension] = encontrados
-        # Exigir repetición de una misma alternativa; no inflar por alternativas solapadas.
         menciones[dimension] = max((e['menciones'] for e in evidencia), default=0)
-    ubicaciones = []
-    for campo, etiqueta in (('titulo', 'TITULO'), ('cuerpo_extraido', 'CUERPO'), ('descripcion', 'DESCRIPCION')):
-        if campo == 'cuerpo_extraido' and (publicacion.get('recuperacion') or {}).get('fuente_texto') == 'DESCRIPCION_BRAVE':
-            continue
-        contenido = publicacion.get(campo)
-        if not isinstance(contenido, str):
-            continue
-        secuencia = [_tokens(contenido)]
-        if any((_menciones(_tokens(e), secuencia) or _partes_principales(_tokens(e), secuencia)) for e in marco.entidades if _tokens(e)):
-            ubicaciones.append(etiqueta)
-    entidad, contexto, territorio = (matches[d] for d in ('entidades', 'contextos', 'territorios'))
-    repetida = menciones['entidades'] >= 2
-    if not entidad:
+    principal = marco.entidades[0]
+    principal_presente = principal in matches['entidades']
+    cantidad_principal = _menciones(_tokens(principal), textos_unicos)
+    contexto, territorio = matches['contextos'], matches['territorios']
+    if not principal_presente:
         score = 0.0
     elif contexto and territorio:
-        score = 1.0 if repetida else 0.8
+        score = 1.0 if cantidad_principal >= 2 else 0.8
     elif contexto or territorio:
-        score = 0.6
-    else:
         score = 0.4
+    else:
+        score = 0.2
     score_base = score
-    titulo = publicacion.get('titulo') if isinstance(publicacion.get('titulo'), str) else ''
-    cuerpo = publicacion.get('cuerpo_extraido') if isinstance(publicacion.get('cuerpo_extraido'), str) else ''
-    titulo_tokens = [_tokens(titulo)]
-    exactas_titulo = [e for e in marco.entidades if _tokens(e) and _menciones(_tokens(e), titulo_tokens)]
-    principal = _tokens(marco.entidades[0])
-    principal_titulo = bool(principal and _menciones(principal, titulo_tokens))
-    principal_inicio = bool(principal and _menciones(principal, [_tokens(cuerpo[:500])]))
+    genericos = list(marco.territorios_genericos)
+    especificos = [v for v in marco.territorios if v not in genericos]
+    genericos_encontrados = [v for v in territorio if v in genericos]
+    especificos_encontrados = [v for v in territorio if v in especificos]
     penalizaciones = []
-    if entidad and not exactas_titulo:
-        score = min(score, 0.2)
-        penalizaciones.append({'codigo': 'entidad_sin_titulo_exacto', 'limite': 0.2,
-                                'motivo': 'La entidad no aparece completa en el título.'})
-    if entidad and not principal_titulo and not principal_inicio:
-        score = min(score, 0.3)
-        penalizaciones.append({'codigo': 'principal_ausente_del_inicio', 'limite': 0.3,
-                                'motivo': 'La primera entidad del Marco no está en el título ni en los primeros 500 caracteres del cuerpo.'})
-    detalles['entidades'].update(exactas_en_titulo=exactas_titulo,
-                                principal_en_titulo=principal_titulo,
-                                principal_en_primeros_500=principal_inicio)
-    dimensiones = [('entidad', entidad), ('contexto', contexto), ('territorio', territorio)]
-    presentes = [f'{nombre}: {", ".join(valores)}' for nombre, valores in dimensiones if valores]
-    faltantes = [nombre for nombre, valores in dimensiones if not valores]
+    if principal_presente and genericos_encontrados and not especificos_encontrados:
+        score = min(score, 0.4)
+        penalizaciones.append({'codigo': 'solo_territorio_generico', 'limite': 0.4,
+                                'motivo': 'Solo coinciden territorios declarados genéricos; falta un territorio específico del Marco.'})
+    detalles['territorios'].update(genericos=genericos, especificos=especificos,
+                                  genericos_encontrados=genericos_encontrados,
+                                  especificos_encontrados=especificos_encontrados,
+                                  criterio_especificidad='DECLARACION_DEL_MARCO')
+    detalles['entidades'].update(principal=principal, principal_presente=principal_presente,
+                                menciones_principal=cantidad_principal)
+    ubicaciones = []
+    etiquetas = {'TITULO': 'TITULO', 'DESCRIPCION': 'DESCRIPCION', 'CUERPO_EXTRAIDO': 'CUERPO',
+                 'YOUTUBE_TITULO': 'METADATOS_YOUTUBE_TITULO', 'YOUTUBE_DESCRIPCION': 'METADATOS_YOUTUBE_DESCRIPCION'}
+    for campo in ('TITULO', 'CUERPO_EXTRAIDO', 'DESCRIPCION', 'YOUTUBE_TITULO', 'YOUTUBE_DESCRIPCION'):
+        if campo == 'CUERPO_EXTRAIDO' and (publicacion.get('recuperacion') or {}).get('fuente_texto') == 'DESCRIPCION_BRAVE':
+            continue
+        for nombre, texto in fuentes:
+            if nombre == campo and _menciones(_tokens(principal), [_tokens(texto)]):
+                ubicaciones.append(etiquetas[campo])
+    faltantes = []
+    if not principal_presente:
+        faltantes.append('entidad principal')
+    if not contexto:
+        faltantes.append('contexto')
+    if not territorio:
+        faltantes.append('territorio')
+    presentes = [f'{nombre}: {", ".join(matches[dimension])}'
+                 for nombre, dimension in (('entidad', 'entidades'), ('contexto', 'contextos'), ('territorio', 'territorios'))
+                 if matches[dimension]]
     justificacion = 'Encontrado: ' + ('; '.join(presentes) or 'ninguna dimensión') + '. '
     justificacion += 'Falta: ' + (', '.join(faltantes) or 'ninguna dimensión') + '.'
-    if entidad and contexto and territorio:
-        justificacion += ' Entidad con múltiples menciones.' if repetida else ' Sin repetición de la entidad.'
     if penalizaciones:
         justificacion += ' ' + ' '.join(p['motivo'] for p in penalizaciones)
-    return {'score_emm': score, 'score_base': score_base, 'penalizaciones': penalizaciones, 'detalles': detalles, 'match_entidad': entidad,
+    return {'score_emm': score, 'score_base': score_base, 'penalizaciones': penalizaciones,
+            'detalles': detalles, 'match_entidad': matches['entidades'],
             'match_contexto': contexto, 'match_territorio': territorio,
-            'menciones_por_dimension': menciones, 'justificacion': justificacion,
+            'entidad_principal_presente': principal_presente,
+            'coocurrencia': principal_presente and bool(contexto or territorio),
+            'menciones_por_dimension': menciones, 'fuentes_texto_evaluadas': [n for n, _ in fuentes],
+            'justificacion': justificacion,
             'ubicacion_entidad': ubicaciones[0] if ubicaciones else None, 'ubicaciones_entidad': ubicaciones}

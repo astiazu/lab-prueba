@@ -133,54 +133,57 @@ El borrador de red añade `www.googleapis.com`; requiere revisar, guardar y
 publicar la configuración del entorno. También se necesita habilitar YouTube
 Data API v3 para la clave y disponer de cuota. El código no configura esos permisos.
 
-## Paso 4: termómetro EMM flexible
+## Paso 4: Súper-Texto y nueva retención EMM
 
-`evaluar_publicacion(marco, publicacion)` acepta el string del Marco o el contrato
-`Marco` y evalúa título y cuerpo disponible. Normaliza Unicode y mayúsculas,
-conservando acentos. Contextos y territorios son alternativas: una frase completa
-de cada lista basta para considerar presente esa dimensión.
+El evaluador concatena todo el texto disponible: `titulo`, `descripcion`,
+`cuerpo_extraido`, `metadatos_youtube.titulo` y `metadatos_youtube.descripcion`.
+`fuentes_texto_evaluadas` identifica las fuentes utilizadas. Las dimensiones se
+buscan en este Súper-Texto sin distinguir mayúsculas, conservando los acentos.
+No se penaliza la ausencia en el título ni en los primeros 500 caracteres.
 
-Una entidad puede coincidir como frase completa o por partes principales. La
-heurística genérica considera palabras de cuatro o más caracteres y exige al
-menos dos tercios de esas palabras distintas, redondeando hacia arriba, con un
-mínimo de dos cuando hay varias. Si solo hay una palabra larga, esa es su parte
-principal. Las partes deben aparecer dentro de una ventana de 12 tokens; no se
-usan diccionarios de nombres, cargos, categorías ni lugares. Entidades formadas
-solo por palabras cortas requieren frase completa. Estas son aproximaciones
-léxicas auditables, no decisiones semánticas de admisión.
+La entidad principal es la primera alternativa de Entidades del Marco y debe
+aparecer completa. Una coincidencia parcial o solo con otra alternativa no basta.
+Contextos y territorios son alternativas: basta una de cada dimensión. No se
+usan diccionarios temáticos, profesiones, personas o lugares predefinidos.
 
-Scores:
+Escala:
 
-- 0.0: ninguna entidad.
-- 0.4: entidad sin contexto ni territorio.
-- 0.6: entidad más contexto o territorio.
-- 0.8: las tres dimensiones presentes.
-- 1.0: las tres presentes y al menos dos menciones no solapadas de una misma
-  alternativa de entidad en título/cuerpo. No se suman alternativas solapadas
-  para inflar el contador.
+- 0.0: no aparece la entidad principal.
+- 0.2: aparece solo la entidad principal, sin contexto ni territorio.
+- 0.4: entidad principal y una dimensión (contexto o territorio).
+- 0.8: entidad principal, contexto y territorio.
+- 1.0: las tres dimensiones y al menos dos menciones de la entidad principal.
 
-`evaluacion_contextual.detalles` conserva encontrados, faltantes y la evidencia
-por alternativa (`metodo`, `menciones`). También se guardan los matches,
-`menciones_por_dimension`, la justificación y el `score_emm` en cada publicación.
-Se conserva `score_base` antes de las penalizaciones y `penalizaciones` con el
-código, límite y motivo de cada regla aplicada:
+Para contar menciones se eliminan campos de texto idénticos normalizados: copiar
+la misma descripción al cuerpo o a metadatos no genera alta densidad por sí solo.
+Se guardan `score_base`, `penalizaciones`, `detalles`, los matches y la justificación.
 
-- Si hay coincidencia de entidad, pero ninguna alternativa completa aparece en
-  el título, el score se limita a 0.2. Las coincidencias parciales no evitan esta
-  penalización. La comparación exacta usa palabras completas sin distinguir
-  mayúsculas ni separar artificialmente título y cuerpo.
-- La entidad principal es la **primera alternativa** de Entidades en el Marco.
-  Si no está completa en el título ni en los primeros 500 caracteres del cuerpo,
-  el score se limita a 0.3. Si también aplica la regla anterior, prevalece 0.2.
-- Sin coincidencia de entidad el score sigue siendo 0.0.
+**El umbral sigue siendo 0.5.** Por lo tanto, aunque entidad más una dimensión
+cumple la coocurrencia mínima, su score 0.4 se conserva en descartadas; el principal
+recibe las coincidencias de 0.8/1.0 que no tengan penalización territorial.
 
-`detalles.entidades` indica `exactas_en_titulo`, `principal_en_titulo` y
-`principal_en_primeros_500`. No se usan listas de personas, profesiones ni temas.
-El backend conserva todo el inventario y los snapshots para auditoría.
+## Territorios genéricos declarados por Marco
+
+El formulario permite introducir territorios genéricos separados por comas.
+La API acepta `territorios_genericos` como lista opcional de alternativas que ya
+existan en el territorio del Marco; cualquier valor ajeno produce un error JSON.
+Por ejemplo, para `Elemento; Proceso; Localidad, Región Amplia`, se puede declarar
+`"territorios_genericos": ["Región Amplia"]`.
+
+Todos los territorios no declarados genéricos son específicos. No se infiere
+esta categoría por cantidad de palabras ni mediante un listado de países: un
+territorio específico puede tener una sola palabra. Si coincide un territorio
+genérico pero ninguno específico, el score máximo es 0.4. La regla se registra
+como `solo_territorio_generico`, con todos los encontrados y faltantes en
+`detalles.territorios`. Sin declaración no se aplica una clasificación implícita.
+
+El JSON conserva la declaración utilizada. Si cambia la política de territorios,
+el histórico del mismo Marco/plan/período se vuelve a evaluar con la nueva política,
+sin perder publicaciones ni modificar los snapshots previos.
 
 ## Visualización
 
-El panel oculta publicaciones con score inferior a 0.5 y muestra al final
+El panel ordena de mayor a menor score y oculta publicaciones con score inferior a 0.5 y muestra al final
 `[X] publicaciones descartadas por no cumplir el Marco EMM.` Los scores ausentes
 o inválidos se tratan como no evaluados y se ocultan también. Los contadores de
 URLs y orígenes describen el inventario completo, no solo las filas visibles.
@@ -203,8 +206,8 @@ score_emm=...` por publicación después de recuperar el lote.
 el título, luego el cuerpo y por último la descripción. `ubicaciones_entidad`
 conserva todas las ubicaciones encontradas. La descripción de Brave copiada a
 `cuerpo_extraido` como respaldo se atribuye a `DESCRIPCION`, no a un HTML descargado.
-Esta trazabilidad aplica las mismas coincidencias completas/parciales de entidad;
-no modifica por sí misma las dimensiones ni el cálculo del score.
+Esta trazabilidad identifica la entidad principal completa. Incluye también
+`METADATOS_YOUTUBE_TITULO` y `METADATOS_YOUTUBE_DESCRIPCION` si corresponde.
 
 ## Diagnóstico de YouTube
 

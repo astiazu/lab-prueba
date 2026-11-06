@@ -28,7 +28,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     texto = payload.get('marco')
     if not isinstance(texto, str) or not 0 < len(texto) <= 4000:
         raise ValueError('Marco inválido')
-    marco = Marco.desde_input(texto)
+    marco = Marco.desde_input(texto, territorios_genericos=payload.get('territorios_genericos'))
     periodo = payload.get('periodo')
     try:
         if not isinstance(periodo, dict):
@@ -131,7 +131,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
                              max_solicitudes=max_documentos)
     publicaciones = recuperacion.pop('publicaciones')
     for indice, publicacion in enumerate(publicaciones, 1):
-        publicacion['evaluacion_contextual'] = evaluar_publicacion(texto, publicacion)
+        publicacion['evaluacion_contextual'] = evaluar_publicacion(marco, publicacion)
         publicacion['score_emm'] = publicacion['evaluacion_contextual']['score_emm']
         publicacion['ubicacion_entidad'] = publicacion['evaluacion_contextual']['ubicacion_entidad']
         logging.getLogger(__name__).info('[EMM] %s/%s score_emm=%.1f %s', indice, len(publicaciones), publicacion['score_emm'], publicacion.get('titulo', ''))
@@ -148,8 +148,9 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     aceptadas = [p for p in publicaciones if p['score_emm'] >= 0.5]
     resultado = {
         'modo': 'BRAVE_SEARCH_REAL', 'simulado': False, 'proveedor': 'BRAVE_WEB',
-        'version': 'LAB_EMM_FILTRADO_V4', 'nueva_busqueda': True,
+        'version': 'LAB_EMM_SUPERTEXTO_V5', 'nueva_busqueda': True,
         'fecha_ejecucion_utc': ahora.isoformat(), 'marco': texto, 'periodo': periodo,
+        'territorios_genericos': list(marco.territorios_genericos),
         'plan_consultas': plan_consultas, 'paginas_brave_maximas': paginas_brave,
         'solicitudes_exitosas': exitosas, 'solicitudes_intentadas': intentadas,
         'solicitudes_externas': intentadas + recuperacion['solicitudes_intentadas'] + datos_youtube['solicitudes_intentadas'],

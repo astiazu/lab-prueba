@@ -3,6 +3,7 @@
 (() => {
     const form = document.getElementById("form");
     const marco = document.getElementById("marco");
+    const genericos = document.getElementById("territorios-genericos");
     const desde = document.getElementById("desde");
     const hasta = document.getElementById("hasta");
     const estado = document.getElementById("estado-consulta");
@@ -28,7 +29,7 @@
     observador.observe(estado, { childList: true, characterData: true, subtree: true });
     actualizarBoton();
 
-    for (const campo of [marco, desde, hasta]) {
+    for (const campo of [marco, desde, hasta, genericos].filter(Boolean)) {
         campo.addEventListener("input", () => {
             version += 1;
             estado.textContent = "Sin validar";
@@ -62,7 +63,9 @@
             texto(panel, "p", typeof aviso === "string" ? aviso : `${aviso.proveedor || "Motor"}: ${aviso.error || JSON.stringify(aviso)}`);
         }
         let descartadas = datos.total_publicaciones_descartadas ?? datos.publicaciones_descartadas?.length ?? 0;
-        for (const publicacion of datos.publicaciones) {
+        const scorePublicacion = p => p.score_emm ?? p.evaluacion_contextual?.score_emm ?? 0;
+        const ordenadas = [...datos.publicaciones].sort((a, b) => scorePublicacion(b) - scorePublicacion(a));
+        for (const publicacion of ordenadas) {
             const score = publicacion.score_emm ?? publicacion.evaluacion_contextual?.score_emm ?? 0;
             if (typeof score !== "number" || !Number.isFinite(score) || score < 0.5) {
                 descartadas += 1;
@@ -114,6 +117,7 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     marco: marco.value.trim(),
+                    ...(genericos?.value.trim() ? { territorios_genericos: genericos.value.split(",").map(v => v.trim()).filter(Boolean) } : {}),
                     periodo: { desde: desde.value, hasta: hasta.value },
                 }),
             });

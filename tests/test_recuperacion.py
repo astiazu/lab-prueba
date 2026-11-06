@@ -126,8 +126,10 @@ class RecuperacionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
             resultado = motor.ejecutar_busqueda(payload, brave_consultar=proveedor, documental_obtener_html=obtener)
         self.assertEqual(resultado['total_urls_unicas'], 3)
-        self.assertEqual([p['evaluacion_contextual']['score_emm'] for p in resultado['publicaciones_descartadas']], [0.2, 0.0, 0.0])
-        self.assertEqual(resultado['publicaciones_descartadas'][2]['recuperacion']['estado'], 'ERROR')
+        self.assertEqual(len(resultado['publicaciones']), 1)
+        self.assertEqual(resultado['publicaciones'][0]['score_emm'], 0.8)
+        self.assertEqual([p['evaluacion_contextual']['score_emm'] for p in resultado['publicaciones_descartadas']], [0.0, 0.0])
+        self.assertEqual(resultado['publicaciones_descartadas'][1]['recuperacion']['estado'], 'ERROR')
         self.assertEqual(resultado['recuperacion_documental']['documentos_con_texto'], 2)
         self.assertEqual(resultado['errores'][0]['proveedor'], 'RECUPERACION_DOCUMENTAL')
 

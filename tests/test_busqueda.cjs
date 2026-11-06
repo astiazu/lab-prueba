@@ -12,7 +12,7 @@ class Elemento {
     querySelector() { return acciones; }
 }
 const acciones = new Elemento();
-const elementos = Object.fromEntries(['form', 'marco', 'desde', 'hasta', 'estado-consulta'].map(id => [id, new Elemento()]));
+const elementos = Object.fromEntries(['form', 'marco', 'desde', 'hasta', 'estado-consulta', 'territorios-genericos'].map(id => [id, new Elemento()]));
 let observador;
 let peticion;
 const respuesta = {
@@ -73,6 +73,19 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     await elementos.form.events.submit({ preventDefault() {} });
     assert.equal(panel.children.filter(e => e.className === 'pub').length, 1);
     assert.equal(panel.children.at(-1).textContent, '[7] publicaciones descartadas por no cumplir el Marco EMM.');
+    respuesta.publicaciones = [
+        { ...respuesta.publicaciones[0], titulo: 'Media', score_emm: 0.8 },
+        { ...respuesta.publicaciones[0], titulo: 'Alta', score_emm: 1.0 },
+        { ...respuesta.publicaciones[0], titulo: 'Baja', score_emm: 0.4 },
+    ];
+    elementos['territorios-genericos'].value = 'c';
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.deepEqual(panel.children.filter(e => e.className === 'pub').map(e => e.children[0].textContent), ['Alta', 'Media']);
+    assert.equal(respuesta.publicaciones[0].titulo, 'Media');
+    assert.equal(panel.children.at(-1).textContent, '[8] publicaciones descartadas por no cumplir el Marco EMM.');
+    assert.deepEqual(JSON.parse(peticion.opciones.body).territorios_genericos, ['c']);
+    elementos['territorios-genericos'].events.input();
+    assert.equal(boton.disabled, true);
     elementos.marco.events.input();
     assert.equal(boton.disabled, true);
     assert.equal(panel.children.length, 0);

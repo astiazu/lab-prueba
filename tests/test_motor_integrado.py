@@ -136,7 +136,7 @@ class MotorTests(unittest.TestCase):
             repetido = motor.ejecutar_busqueda(payload, brave_consultar=lambda *args: {'web': {'results': []}},
                 documental_obtener_html=lambda url: '<body>' + cuerpos[url] + '</body>')
             self.assertEqual(snapshot.read_bytes(), previo)
-        self.assertEqual([p['score_emm'] for p in resultado['publicaciones']], [1.0, 0.8, 0.6])
+        self.assertEqual([p['score_emm'] for p in resultado['publicaciones']], [1.0, 0.8, 0.8])
         self.assertEqual([p['score_emm'] for p in resultado['publicaciones_descartadas']], [0.4, 0.2, 0.0])
         self.assertEqual(resultado['total_urls_unicas'], 6)
         self.assertEqual(resultado['total_publicaciones_aceptadas'], 3)
@@ -150,3 +150,14 @@ class MotorTests(unittest.TestCase):
         self.assertEqual(len(resultado['publicaciones']), 1)
         self.assertEqual(resultado['publicaciones'][0]['score_emm'], 0.5)
         self.assertEqual(resultado['publicaciones_descartadas'], [])
+
+    def test_generic_policy_change_reevaluates_existing_inventory(self):
+        payload = {**PAYLOAD, 'marco': 'Proyecto Alfa; Diseño; Localidad, Región Amplia', 'max_brave': 1}
+        respuesta = {'web': {'results': [{'url': 'https://example.org/politica', 'title': 'Una nota', 'description': 'Proyecto Alfa Diseño Región Amplia'}]}}
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
+            primero = motor.ejecutar_busqueda(payload, brave_consultar=lambda *args: respuesta)
+            segundo = motor.ejecutar_busqueda({**payload, 'territorios_genericos': ['Región Amplia']}, brave_consultar=lambda *args: {'web': {'results': []}})
+        self.assertEqual(primero['publicaciones'][0]['score_emm'], 0.8)
+        self.assertEqual(segundo['historico']['urls_heredadas'], 1)
+        self.assertEqual(segundo['publicaciones'], [])
+        self.assertEqual(segundo['publicaciones_descartadas'][0]['score_emm'], 0.4)
