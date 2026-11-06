@@ -109,7 +109,7 @@ class RecuperacionTests(unittest.TestCase):
         self.assertEqual(len(resultado['publicaciones']), 103)
         self.assertEqual(len(logs.output), 103)
         self.assertIn('103/103', logs.output[-1])
-        self.assertTrue(all(p['score_emm'] == 1.0 for p in resultado['publicaciones']))
+        self.assertTrue(all(p['score_emm'] == 0.8 for p in resultado['publicaciones']))
         self.assertTrue(all(p['evaluacion_contextual']['detalles'] for p in resultado['publicaciones']))
 
     def test_end_to_end_retains_zero_score_and_download_failure(self):
@@ -126,7 +126,7 @@ class RecuperacionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
             resultado = motor.ejecutar_busqueda(payload, brave_consultar=proveedor, documental_obtener_html=obtener)
         self.assertEqual(resultado['total_urls_unicas'], 3)
-        self.assertEqual([p['evaluacion_contextual']['score_emm'] for p in resultado['publicaciones']], [1.0, 0.0, 0.0])
+        self.assertEqual([p['evaluacion_contextual']['score_emm'] for p in resultado['publicaciones']], [0.8, 0.0, 0.0])
         self.assertEqual(resultado['publicaciones'][2]['recuperacion']['estado'], 'ERROR')
         self.assertEqual(resultado['recuperacion_documental']['documentos_con_texto'], 2)
         self.assertEqual(resultado['errores'][0]['proveedor'], 'RECUPERACION_DOCUMENTAL')

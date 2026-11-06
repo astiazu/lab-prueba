@@ -1,5 +1,5 @@
 """Descubrimiento exclusivamente con la API oficial Brave Search."""
-from collections import Counter, deque
+from collections import Counter
 from datetime import date, datetime, timezone
 import json
 import logging
@@ -8,67 +8,16 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from app.laboratorio.motor_v2.contratos import Marco
+from app.laboratorio.interfaz_v2.planificador_consultas import construir_consulta
 from app.laboratorio.motor_v2.recuperacion_documental_enriquecida import enriquecer
 from app.laboratorio.motor_v2.evaluador_contextual import evaluar_publicacion
 from app.laboratorio.interfaz_v2 import descubrimiento_brave as brave
 
 # No heredar datos simulados o de proveedores anteriores.
 DESTINO = Path(__file__).resolve().parents[3] / 'datos' / 'ejecuciones' / 'descubrimiento_brave'
-REDES = ('facebook.com', 'instagram.com', 'youtube.com', 'x.com', 'twitter.com')
-
 def planificar(marco):
-    """Rondas equilibradas por entidad, contexto, territorio y red.
-    Las dimensiones son alternativas: ninguna se exige conjuntamente para admitir.
-    """
-    grupos = {}
-    def agregar(familia, linea, consulta):
-        grupos.setdefault((familia, linea), []).append((familia, consulta))
-    for entidad in marco.entidades:
-        e = '"' + entidad.replace('"', '') + '"'
-        for i, contexto in enumerate(marco.contextos):
-            linea = (entidad, i)
-            for territorio in marco.territorios:
-                agregar('contexto_territorio', linea, f'{e} {contexto} {territorio}')
-            agregar('contexto', linea, f'{e} {contexto}')
-            for sitio in REDES:
-                agregar('red_contexto', (entidad, i, sitio), f'{e} {contexto} site:{sitio}')
-        for i, territorio in enumerate(marco.territorios):
-            agregar('territorio', (entidad, i), f'{e} {territorio}')
-            for sitio in REDES:
-                agregar('red_territorio', (entidad, i, sitio), f'{e} {territorio} site:{sitio}')
-        agregar('exploracion', (entidad, 0), e)
-    orden = ('contexto_territorio', 'red_contexto', 'territorio', 'red_territorio', 'contexto', 'exploracion')
-    colas = {f: deque((k, deque(v)) for k, v in grupos.items() if k[0] == f) for f in orden}
-    salida, vistos = [], set()
-    while any(colas.values()):
-        for familia in orden:
-            cola = colas[familia]
-            if not cola:
-                continue
-            clave, opciones = cola.popleft()
-            tipo, q = opciones.popleft()
-            if q.casefold() not in vistos:
-                salida.append((tipo, q))
-                vistos.add(q.casefold())
-            if opciones:
-                cola.append((clave, opciones))
-    return salida
-
-def _seleccionar_brave_v5(propuestas, limite):
-    """Fases secuenciales: web contextual y luego redes indexadas.
-
-    Rondas equilibradas entre contextos/territorios en el orden del planificador.
-    La selección no supone acreditación EMM ni acceso nativo a redes.
-    """
-    web = [x for x in propuestas if not x[0].startswith('red_')]
-    redes = [x for x in propuestas if x[0].startswith('red_')]
-    por_red = {red: deque(x for x in redes if f'site:{red}' in x[1]) for red in REDES}
-    redes_equilibradas = []
-    while any(por_red.values()):
-        for red in REDES:
-            if por_red[red]:
-                redes_equilibradas.append(por_red[red].popleft())
-    return (web + redes_equilibradas)[:limite]
+    """Una sola consulta estricta; no agregar búsquedas abiertas o de dominio."""
+    return [('booleano_estricto', construir_consulta(marco))]
 
 
 def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=None):
@@ -99,14 +48,15 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
         raise brave.BraveError('brave_no_configurado', 'Falta BRAVE_API_KEY o BRAVE_SEARCH_API_KEY en el entorno o en .env.', 503)
     periodo = {'desde': desde.isoformat(), 'hasta': hasta.isoformat()}
     propuestas = planificar(marco)
-    seleccion = _seleccionar_brave_v5(propuestas, max_brave)
+    seleccion = propuestas[:max_brave]
+    consulta_booleana = propuestas[0][1]
     urls, registros, errores = {}, [], []
     anterior = None
     if DESTINO.is_dir():
         for ruta in sorted(DESTINO.glob('busqueda_integrada_*.json'), reverse=True):
             try:
                 candidato = json.loads(ruta.read_text(encoding='utf-8'))
-                if candidato.get('modo') == 'BRAVE_SEARCH_REAL' and candidato.get('marco') == texto and candidato.get('periodo') == periodo:
+                if candidato.get('modo') == 'BRAVE_SEARCH_REAL' and candidato.get('marco') == texto and candidato.get('periodo') == periodo and candidato.get('consulta_booleana') == consulta_booleana:
                     anterior = candidato
                     break
             except (ValueError, OSError, AttributeError):
@@ -167,8 +117,9 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
         avisos.append('Algunos documentos no aportaron cuerpo; su evaluación usa los textos disponibles.')
     resultado = {
         'modo': 'BRAVE_SEARCH_REAL', 'simulado': False, 'proveedor': 'BRAVE_WEB',
-        'version': 'LAB_BRAVE_RECUPERACION_EMM_V1', 'nueva_busqueda': True,
+        'version': 'LAB_EMM_BOOLEANO_V2', 'nueva_busqueda': True,
         'fecha_ejecucion_utc': ahora.isoformat(), 'marco': texto, 'periodo': periodo,
+        'consulta_booleana': consulta_booleana,
         'solicitudes_exitosas': exitosas, 'solicitudes_intentadas': intentadas,
         'solicitudes_externas': intentadas + recuperacion['solicitudes_intentadas'],
         'solicitudes_por_proveedor': {'BRAVE_WEB': intentadas, 'RECUPERACION_DOCUMENTAL': recuperacion['solicitudes_intentadas']},

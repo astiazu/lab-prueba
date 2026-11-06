@@ -61,7 +61,13 @@
         for (const aviso of [...datos.avisos, ...datos.errores]) {
             texto(panel, "p", typeof aviso === "string" ? aviso : `${aviso.proveedor || "Motor"}: ${aviso.error || JSON.stringify(aviso)}`);
         }
+        let descartadas = 0;
         for (const publicacion of datos.publicaciones) {
+            const score = publicacion.score_emm ?? publicacion.evaluacion_contextual?.score_emm ?? 0;
+            if (typeof score !== "number" || !Number.isFinite(score) || score < 0.5) {
+                descartadas += 1;
+                continue;
+            }
             const articulo = document.createElement("article");
             articulo.className = "pub";
             texto(articulo, "h3", publicacion.titulo);
@@ -91,6 +97,7 @@
             }
             panel.append(articulo);
         }
+        texto(panel, "small", `[${descartadas}] publicaciones descartadas por no cumplir el Marco EMM.`);
     }
 
     form.addEventListener("submit", async (evento) => {

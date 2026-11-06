@@ -17,7 +17,7 @@ let observador;
 let peticion;
 const respuesta = {
     total_urls_unicas: 1, solicitudes_exitosas: 0, origenes: { 'example.com': 1 }, simulado: true,
-    publicaciones: [{ titulo: '[SIMULADO] Prueba', origen: 'Demo local', fecha_indice: '2025-01-01', descripcion: '<script>texto</script>', url: 'https://example.com/demo' }],
+    publicaciones: [{ score_emm: 0.6, titulo: '[SIMULADO] Prueba', origen: 'Demo local', fecha_indice: '2025-01-01', descripcion: '<script>texto</script>', url: 'https://example.com/demo' }],
     errores: [], avisos: [], advertencia: 'MODO DEMO', periodo: { desde: '2025-01-01', hasta: '2025-12-31' },
 };
 vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
@@ -43,19 +43,31 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
     assert.deepEqual(JSON.parse(peticion.opciones.body), { marco: 'a;b;c', periodo: respuesta.periodo });
     const panel = elementos.form.siguiente;
     assert.equal(panel.children[0].textContent, 'Resultados de descubrimiento');
-    assert.equal(panel.children.at(-1).children[2].textContent, '<script>texto</script>');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[2].textContent, '<script>texto</script>');
     assert.equal(panel.children[4].textContent, 'Orígenes: example.com: 1');
-    assert.ok(panel.children.at(-1).children[3].textContent.startsWith('URL ficticia'));
+    assert.ok(panel.children.filter(e => e.className === 'pub').at(-1).children[3].textContent.startsWith('URL ficticia'));
     respuesta.publicaciones[0].simulado = false;
     await elementos.form.events.submit({ preventDefault() {} });
-    assert.equal(panel.children.at(-1).children[3].textContent, 'Ver publicación');
-    assert.equal(panel.children.at(-1).children[3].href, 'https://example.com/demo');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[3].textContent, 'Ver publicación');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[3].href, 'https://example.com/demo');
     respuesta.publicaciones[0].evaluacion_contextual = { score_emm: 0.6, justificacion: 'Encontrado: entidad y contexto. Falta: territorio.' };
     respuesta.publicaciones[0].recuperacion = { estado: 'RECUPERADO' };
     respuesta.publicaciones[0].cuerpo_extraido = '<script>contenido como texto</script>';
     await elementos.form.events.submit({ preventDefault() {} });
-    assert.equal(panel.children.at(-1).children[4].textContent, 'Score EMM: 0.6');
-    assert.equal(panel.children.at(-1).children.at(-1).children[1].textContent, '<script>contenido como texto</script>');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children[4].textContent, 'Score EMM: 0.6');
+    assert.equal(panel.children.filter(e => e.className === 'pub').at(-1).children.at(-1).children[1].textContent, '<script>contenido como texto</script>');
+    respuesta.publicaciones.push({ score_emm: 0.4 }, { score_emm: 0 }, { score_emm: 0.49 });
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.equal(panel.children.filter(e => e.className === 'pub').length, 1);
+    assert.equal(panel.children.at(-1).textContent, '[3] publicaciones descartadas por no cumplir el Marco EMM.');
+    respuesta.publicaciones[0].score_emm = 0.5;
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.equal(panel.children.filter(e => e.className === 'pub').length, 1);
+    respuesta.publicaciones[0].score_emm = 0.4;
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.equal(panel.children.filter(e => e.className === 'pub').length, 0);
+    assert.equal(panel.children.at(-1).textContent, '[4] publicaciones descartadas por no cumplir el Marco EMM.');
+    assert.equal(respuesta.publicaciones.length, 4);
     elementos.marco.events.input();
     assert.equal(boton.disabled, true);
     assert.equal(panel.children.length, 0);

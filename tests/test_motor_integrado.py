@@ -28,15 +28,29 @@ class MotorTests(unittest.TestCase):
                 self.assertEqual(segundo['historico']['urls_heredadas'], 1)
                 self.assertEqual(primero['total_urls_unicas'], 1)
                 self.assertEqual(primero['errores'], [])
-                self.assertEqual(primero['solicitudes_por_proveedor'], {'BRAVE_WEB': 2, 'RECUPERACION_DOCUMENTAL': 0})
-                self.assertEqual(proveedor.call_count, 4)
+                self.assertEqual(primero['solicitudes_por_proveedor'], {'BRAVE_WEB': 1, 'RECUPERACION_DOCUMENTAL': 0})
+                self.assertEqual(proveedor.call_count, 2)
+                self.assertEqual(proveedor.call_args.args[0], '("Entidad libre") AND (Contexto) AND ("Territorio")')
                 publicacion = primero['publicaciones'][0]
                 self.assertEqual(publicacion['proveedores'], ['BRAVE_WEB'])
-                self.assertEqual(len(publicacion['consultas_origen']), 2)
+                self.assertEqual(len(publicacion['consultas_origen']), 1)
                 self.assertFalse(publicacion['simulado'])
                 self.assertEqual(len(json.loads(contenido)['publicaciones']), 1)
                 self.assertEqual(primero['recuperacion_documental']['pendientes'], 1)
                 self.assertEqual(publicacion['evaluacion_contextual']['score_emm'], 0.0)
+
+    def test_old_natural_language_snapshots_are_not_inherited(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            destino = Path(temporal) / 'datos' / 'ejecuciones' / 'brave'
+            destino.mkdir(parents=True)
+            anterior = {'modo': 'BRAVE_SEARCH_REAL', 'marco': PAYLOAD['marco'], 'periodo': PAYLOAD['periodo'],
+                        'publicaciones': [{'url': 'https://example.org/anterior', 'simulado': False, 'proveedores': ['BRAVE_WEB']}]}
+            (destino / 'busqueda_integrada_anterior.json').write_text(json.dumps(anterior))
+            with patch.object(motor, 'DESTINO', destino):
+                resultado = motor.ejecutar_busqueda(PAYLOAD, brave_consultar=lambda *args: {'web': {'results': []}})
+            self.assertEqual(resultado['publicaciones'], [])
+            self.assertEqual(resultado['historico']['urls_heredadas'], 0)
+            self.assertTrue((destino / 'busqueda_integrada_anterior.json').exists())
 
     def test_error_stops_provider_without_retry(self):
         proveedor = Mock(side_effect=motor.brave.BraveError('brave_limite', 'Límite alcanzado', 429))

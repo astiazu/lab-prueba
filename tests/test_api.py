@@ -70,7 +70,7 @@ class ApiTests(unittest.TestCase):
             self.assertFalse(publicacion['simulado'])
             self.assertTrue(publicacion['proveedores'])
         self.assertEqual(datos['recuperacion_documental']['documentos_con_texto'], 1)
-        self.assertEqual(datos['publicaciones'][0]['evaluacion_contextual']['score_emm'], 1.0)
+        self.assertEqual(datos['publicaciones'][0]['evaluacion_contextual']['score_emm'], 0.8)
 
     def test_invalid_input(self):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}

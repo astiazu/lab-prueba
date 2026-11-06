@@ -19,7 +19,7 @@ Usa el período como filtro `freshness=DESDEtoHASTA`, hasta 20 resultados por
 consulta, un timeout de 15 segundos y un máximo de 4 MiB por respuesta. Conserva
 TLS y el proxy del entorno y no sigue redirecciones con la clave.
 
-`ejecutar_busqueda(payload)` conserva la planificación equilibrada y consolida
+`ejecutar_busqueda(payload)` utiliza una consulta booleana estricta y consolida
 las URLs y sus consultas de origen. `max_brave` limita las consultas (1 a 50,
 por defecto 50). Solo se obtiene la primera página de cada consulta: los
 resultados no representan cobertura exhaustiva. La fecha del índice tampoco
@@ -27,8 +27,8 @@ acredita una fecha de publicación ni admisión EMM.
 
 No se ejecutan DDG, YouTube ni adaptadores de redes. Después de Brave se ejecutan
 la recuperación documental y la evaluación contextual que se describen abajo.
-Las consultas `site:` del planificador son búsquedas indexadas hechas por Brave,
-no llamadas a APIs de redes. Los módulos locales de otros proveedores permanecen
+El planificador no agrega búsquedas abiertas ni restricciones de dominio ajenas
+al Marco. Los módulos locales de otros proveedores permanecen
 inactivos para futuras integraciones; el adaptador y las pruebas DDG se retiraron.
 No se generan publicaciones simuladas ni se heredan snapshots de otros modos.
 
@@ -77,25 +77,57 @@ segundos por documento y límite de 2 MiB por HTML: lotes grandes pueden tardar.
 La red del entorno debe permitir los dominios de las publicaciones. Nunca se
 envía la cabecera de autenticación de Brave a esos sitios.
 
-## Paso 4: evaluación EMM exacta
+## Consultas booleanas universales
 
-`evaluar_publicacion(marco, publicacion)` acepta el Marco como string separado
-por punto y coma, o el contrato `Marco` para compatibilidad. Compara únicamente
-`titulo` y `cuerpo_extraido`. Las descripciones participan a través del fallback
-de recuperación, sin introducir una tercera fuente implícita.
+`interfaz_v2/planificador_consultas.py` construye una sola consulta:
+`(entidades OR ...) AND (contextos OR ...) AND (territorios OR ...)`.
+Las comas definen alternativas en las tres dimensiones, siguiendo la consulta
+de ejemplo del contrato del producto. Las frases de varias palabras se citan;
+los territorios se citan siempre. Los operadores introducidos como alternativas
+se tratan como texto literal. No se agregan vocabularios temáticos ni dominios.
 
-Se comparan palabras completas sin distinguir mayúsculas; se conservan acentos.
-No se usan raíces, similitudes, listas temáticas ni categorías. Para que coincida
-una alternativa de varias palabras, todas deben aparecer en el texto (sin
-exigir adyacencia u orden). Una alternativa completa por dimensión es suficiente.
+El orquestador guarda la consulta en `consulta_booleana` y solo hereda snapshots
+con la misma consulta, Marco y período. Los snapshots de búsqueda natural se
+conservan en disco, pero no se mezclan con la búsqueda estricta.
 
-El score es 0.0 sin entidad, 0.3 con entidad, 0.6 con entidad y contexto y 1.0
-con entidad, contexto y territorio. Entidad más territorio sin contexto da 0.3.
-Se guarda en `publicacion.score_emm` y en `evaluacion_contextual.score_emm`.
-`evaluacion_contextual.detalles` incluye por dimensión las alternativas y palabras
-encontradas y no encontradas; se conservan los matches y la justificación para
-compatibilidad con el panel. No se descarta ni reordena ninguna publicación.
+## Paso 4: termómetro EMM flexible
+
+`evaluar_publicacion(marco, publicacion)` acepta el string del Marco o el contrato
+`Marco` y evalúa título y cuerpo disponible. Normaliza Unicode y mayúsculas,
+conservando acentos. Contextos y territorios son alternativas: una frase completa
+de cada lista basta para considerar presente esa dimensión.
+
+Una entidad puede coincidir como frase completa o por partes principales. La
+heurística genérica considera palabras de cuatro o más caracteres y exige al
+menos dos tercios de esas palabras distintas, redondeando hacia arriba, con un
+mínimo de dos cuando hay varias. Si solo hay una palabra larga, esa es su parte
+principal. Las partes deben aparecer dentro de una ventana de 12 tokens; no se
+usan diccionarios de nombres, cargos, categorías ni lugares. Entidades formadas
+solo por palabras cortas requieren frase completa. Estas son aproximaciones
+léxicas auditables, no decisiones semánticas de admisión.
+
+Scores:
+
+- 0.0: ninguna entidad.
+- 0.4: entidad sin contexto ni territorio.
+- 0.6: entidad más contexto o territorio.
+- 0.8: las tres dimensiones presentes.
+- 1.0: las tres presentes y al menos dos menciones no solapadas de una misma
+  alternativa de entidad en título/cuerpo. No se suman alternativas solapadas
+  para inflar el contador.
+
+`evaluacion_contextual.detalles` conserva encontrados, faltantes y la evidencia
+por alternativa (`metodo`, `menciones`). También se guardan los matches,
+`menciones_por_dimension`, la justificación y el `score_emm` en cada publicación.
+El backend conserva todo el inventario y los snapshots para auditoría.
+
+## Visualización
+
+El panel oculta publicaciones con score inferior a 0.5 y muestra al final
+`[X] publicaciones descartadas por no cumplir el Marco EMM.` Los scores ausentes
+o inválidos se tratan como no evaluados y se ocultan también. Los contadores de
+URLs y orígenes describen el inventario completo, no solo las filas visibles.
+No se borra información del JSON; el filtro se aplica solo en la presentación.
 
 Al iniciar con `python3 run.py`, la terminal muestra una línea `[EMM] i/total
-score_emm=...` por publicación después de recuperar el lote. Las pruebas de lotes
-103 usan respuestas controladas y no consumen la API de Brave ni los sitios web.
+score_emm=...` por publicación después de recuperar el lote.
