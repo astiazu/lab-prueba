@@ -1,16 +1,14 @@
 """Descubrimiento exclusivamente con la API oficial Brave Search."""
-from collections import Counter
 from datetime import date, datetime, timezone
 import json
-import logging
-import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from app.laboratorio.motor_v2.contratos import Marco
+from app.laboratorio.motor_v2.politica_emm import PoliticaEMM
+from app.laboratorio.motor_v2.acumulativo import Inventario, cerrar_corrida, guardar_salida
 from app.laboratorio.interfaz_v2.planificador_consultas import planificar_consultas
 from app.laboratorio.motor_v2.recuperacion_documental_enriquecida import enriquecer
-from app.laboratorio.motor_v2.evaluador_contextual import evaluar_publicacion
 from app.laboratorio.interfaz_v2 import descubrimiento_brave as brave
 from app.laboratorio.interfaz_v2 import descubrimiento_youtube as youtube
 
@@ -25,10 +23,14 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     """Descubrir con Brave, recuperar HTML y evaluar y separar candidatos sin perder trazabilidad."""
     if not isinstance(payload, dict):
         raise ValueError('El payload debe ser un objeto JSON')
+    permitidos = {'marco', 'periodo', 'max_brave', 'paginas_brave', 'max_documentos_enriquecer', 'politica_emm'}
+    if set(payload) - permitidos:
+        raise ValueError('El payload contiene campos no admitidos')
     texto = payload.get('marco')
     if not isinstance(texto, str) or not 0 < len(texto) <= 4000:
         raise ValueError('Marco inválido')
-    marco = Marco.desde_input(texto, territorios_genericos=payload.get('territorios_genericos'))
+    marco = Marco.desde_input(texto)
+    politica = PoliticaEMM.desde_config(payload.get('politica_emm'))
     periodo = payload.get('periodo')
     try:
         if not isinstance(periodo, dict):
@@ -55,23 +57,18 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     plan_consultas = [{'estrategia': tipo, 'consulta': q} for tipo, q in propuestas]
     urls, registros, errores = {}, [], []
     anterior = None
+    inventario = Inventario()
     if DESTINO.is_dir():
         for ruta in sorted(DESTINO.glob('busqueda_integrada_*.json'), reverse=True):
             try:
                 candidato = json.loads(ruta.read_text(encoding='utf-8'))
-                if candidato.get('modo') == 'BRAVE_SEARCH_REAL' and candidato.get('marco') == texto and candidato.get('periodo') == periodo and candidato.get('plan_consultas') == plan_consultas:
+                if candidato.get('modo') == 'BRAVE_SEARCH_REAL' and Marco.desde_input(candidato.get('marco')) == marco and candidato.get('periodo') == periodo:
+                    inventario = Inventario.desde_salida(candidato)
                     anterior = candidato
                     break
-            except (ValueError, OSError, AttributeError):
+            except (ValueError, OSError, AttributeError, TypeError):
                 continue
-    inventario_anterior = ((anterior or {}).get('publicaciones', [])
-                           + (anterior or {}).get('publicaciones_descartadas', []))
-    for doc in inventario_anterior:
-        if isinstance(doc, dict):
-            url = brave._normalizar_url(doc.get('url'))
-            if url and not doc.get('simulado') and doc.get('proveedores') == ['BRAVE_WEB']:
-                urls[url] = doc
-    heredadas = len(urls)
+    urls = inventario.activas
     consultar = brave_consultar or brave._brave
     intentadas = exitosas = 0
     agotadas, firmas = set(), {}
@@ -92,11 +89,15 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
                 detener = True
                 break
             resultados = (respuesta.get('web') or {}).get('results') or []
-            nuevas = 0
+            nuevas = omitidas_archivadas = 0
             fecha_hallazgo = datetime.now(timezone.utc).isoformat()
             for item in resultados:
                 url = brave._normalizar_url(item.get('url'))
                 if not url:
+                    continue
+                if url in inventario.archivadas:
+                    inventario.archivadas_reencontradas.add(url)
+                    omitidas_archivadas += 1
                     continue
                 if url not in urls:
                     urls[url] = {'url': url, 'titulo': item.get('title') or url,
@@ -104,6 +105,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
                                  'fecha_indice': item.get('page_age'), 'origen': urlsplit(url).hostname,
                                  'consultas_origen': [], 'proveedores': ['BRAVE_WEB'], 'simulado': False}
                     nuevas += 1
+                    inventario.nuevas.add(url)
                 if consulta not in urls[url]['consultas_origen']:
                     urls[url]['consultas_origen'].append(consulta)
                 urls[url].setdefault('hallazgos_brave', []).append({
@@ -111,7 +113,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
                     'url_descubierta': item.get('url'), 'recuperado_en': fecha_hallazgo})
             exitosas += 1
             registros.append({'proveedor': 'BRAVE_WEB', 'estrategia': tipo, 'consulta': consulta,
-                              'pagina': pagina + 1, 'resultados': len(resultados), 'nuevas_urls': nuevas})
+                              'pagina': pagina + 1, 'resultados': len(resultados), 'nuevas_urls': nuevas, 'archivadas_omitidas': omitidas_archivadas})
             firma = tuple(sorted(item.get('url', '') for item in resultados))
             repetida = firma in firmas.setdefault(consulta, set())
             firmas[consulta].add(firma)
@@ -121,7 +123,6 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
         if detener or intentadas >= max_brave:
             break
     pendientes = len(propuestas) - len(agotadas)
-    ahora = datetime.now(timezone.utc)
     avisos = ['Estrategia escalonada con hasta 20 resultados por página. No se garantiza cobertura exhaustiva.']
     if errores:
         avisos.append('La búsqueda de Brave se detuvo por un error; se conservaron los resultados disponibles.')
@@ -130,11 +131,7 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
     recuperacion = enriquecer(datos_youtube['publicaciones'], obtener_html=documental_obtener_html,
                              max_solicitudes=max_documentos)
     publicaciones = recuperacion.pop('publicaciones')
-    for indice, publicacion in enumerate(publicaciones, 1):
-        publicacion['evaluacion_contextual'] = evaluar_publicacion(marco, publicacion)
-        publicacion['score_emm'] = publicacion['evaluacion_contextual']['score_emm']
-        publicacion['ubicacion_entidad'] = publicacion['evaluacion_contextual']['ubicacion_entidad']
-        logging.getLogger(__name__).info('[EMM] %s/%s score_emm=%.1f %s', indice, len(publicaciones), publicacion['score_emm'], publicacion.get('titulo', ''))
+    for publicacion in publicaciones:
         if publicacion['recuperacion']['estado'] == 'ERROR':
             error = publicacion['recuperacion']['error']
             errores.append({'proveedor': 'RECUPERACION_DOCUMENTAL', 'url': publicacion['url'],
@@ -143,14 +140,10 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
         avisos.append('Hay documentos pendientes por presupuesto de recuperación; se evaluaron con título y descripción.')
     if any(p['recuperacion']['estado'] in ('ERROR', 'SIN_TEXTO') for p in publicaciones):
         avisos.append('Algunos documentos no aportaron cuerpo; su evaluación usa los textos disponibles.')
-    publicaciones.sort(key=lambda p: p['score_emm'], reverse=True)
-    descartadas = [p for p in publicaciones if p['score_emm'] < 0.5]
-    aceptadas = [p for p in publicaciones if p['score_emm'] >= 0.5]
-    resultado = {
+    resultado = cerrar_corrida(inventario, publicaciones, marco, politica, {
         'modo': 'BRAVE_SEARCH_REAL', 'simulado': False, 'proveedor': 'BRAVE_WEB',
-        'version': 'LAB_EMM_ACUMULATIVO_V6', 'nueva_busqueda': True,
-        'fecha_ejecucion_utc': ahora.isoformat(), 'marco': texto, 'periodo': periodo,
-        'territorios_genericos': list(marco.territorios_genericos),
+        'nueva_busqueda': True, 'periodo': periodo,
+        'corte_previo': (anterior or {}).get('fecha_ejecucion_utc'),
         'plan_consultas': plan_consultas, 'paginas_brave_maximas': paginas_brave,
         'solicitudes_exitosas': exitosas, 'solicitudes_intentadas': intentadas,
         'solicitudes_externas': intentadas + recuperacion['solicitudes_intentadas'] + datos_youtube['solicitudes_intentadas'],
@@ -159,24 +152,9 @@ def ejecutar_busqueda(payload, *, brave_consultar=None, documental_obtener_html=
         'consultas_ejecutadas': registros, 'consultas_pendientes': pendientes,
         'pendientes_por_proveedor': {'BRAVE_WEB': pendientes},
         'cobertura_parcial': True,
-        'total_urls_unicas': len(urls), 'origenes': dict(Counter(d['origen'] for d in urls.values())),
-        'publicaciones': aceptadas, 'publicaciones_descartadas': descartadas,
-        'total_publicaciones_aceptadas': len(aceptadas),
-        'total_publicaciones_descartadas': len(descartadas),
         'errores': errores, 'avisos': avisos,
         'recuperacion_documental': recuperacion,
         'youtube_api': {k: v for k, v in datos_youtube.items() if k != 'publicaciones'},
-        'advertencia': 'Evaluación EMM heurística sobre textos disponibles, resultados principales con score >= 0.5; descartes conservados para auditoría. La fecha de índice no acredita la fecha de publicación.',
-        'historico': {'corte_previo': (anterior or {}).get('fecha_ejecucion_utc'),
-                      'urls_heredadas': heredadas, 'urls_unicas_actuales': len(urls)},
-    }
-    DESTINO.mkdir(parents=True, exist_ok=True)
-    ruta = DESTINO / f"busqueda_integrada_{ahora.strftime('%Y%m%dT%H%M%S%fZ')}.json"
-    resultado['auditoria'] = str(ruta.relative_to(DESTINO.parents[2]))
-    temporal = ruta.with_suffix('.json.tmp')
-    with temporal.open('x', encoding='utf-8') as archivo:
-        json.dump(resultado, archivo, ensure_ascii=False, indent=2)
-        archivo.flush()
-        os.fsync(archivo.fileno())
-    temporal.replace(ruta)
+    })
+    guardar_salida(resultado, DESTINO)
     return resultado

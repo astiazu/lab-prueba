@@ -72,19 +72,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(datos['recuperacion_documental']['documentos_con_texto'], 1)
         self.assertEqual(datos['publicaciones'][0]['evaluacion_contextual']['score_emm'], 1.0)
 
-    def test_explicit_generic_territory_is_validated_without_score_cap(self):
+    def test_policy_is_validated_and_reported(self):
         payload = {'marco': 'Entidad libre; Contexto libre; Territorio libre',
                    'periodo': {'desde': '2025-01-01', 'hasta': '2025-12-31'},
-                   'territorios_genericos': ['Territorio libre']}
+                   'politica_emm': {'umbral_aceptacion': 0.6}}
         estado, datos = self.post(payload)
         self.assertEqual(estado, 200)
-        self.assertEqual(len(datos['publicaciones']), 1)
-        self.assertEqual(datos['publicaciones'][0]['score_emm'], 1.0)
-        self.assertEqual(datos['publicaciones_descartadas'], [])
-        self.assertEqual(datos['territorios_genericos'], ['Territorio libre'])
-        estado, datos = self.post({**payload, 'territorios_genericos': ['No pertenece']})
+        self.assertEqual(datos['politica_emm']['umbral_aceptacion'], 0.6)
+        estado, datos = self.post({**payload, 'politica_emm': {'score_max_sin_entidad': 0.9}})
         self.assertEqual(estado, 400)
-        self.assertEqual(datos['error']['codigo'], 'entrada_motor_invalida')
 
     def test_invalid_input(self):
         periodo = {'desde': '2025-01-01', 'hasta': '2025-12-31'}

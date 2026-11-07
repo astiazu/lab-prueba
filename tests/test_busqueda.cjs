@@ -12,7 +12,7 @@ class Elemento {
     querySelector() { return acciones; }
 }
 const acciones = new Elemento();
-const elementos = Object.fromEntries(['form', 'marco', 'desde', 'hasta', 'estado-consulta', 'territorios-genericos'].map(id => [id, new Elemento()]));
+const elementos = Object.fromEntries(['form', 'marco', 'desde', 'hasta', 'estado-consulta'].map(id => [id, new Elemento()]));
 let observador;
 let peticion;
 const respuesta = {
@@ -79,19 +79,18 @@ vm.runInNewContext(fs.readFileSync('front/busqueda.js', 'utf8'), {
         { ...respuesta.publicaciones[0], titulo: 'Alta', score_emm: 1.0 },
         { ...respuesta.publicaciones[0], titulo: 'Baja', score_emm: 0.4 },
     ];
-    elementos['territorios-genericos'].value = 'c';
     await elementos.form.events.submit({ preventDefault() {} });
     assert.deepEqual(panel.children.filter(e => e.className === 'pub').map(e => e.children[0].textContent), ['Alta', 'Media']);
     assert.equal(respuesta.publicaciones[0].titulo, 'Media');
     assert.equal(panel.children.at(-1).textContent, '[8] publicaciones descartadas por no cumplir el Marco EMM.');
-    assert.deepEqual(JSON.parse(peticion.opciones.body).territorios_genericos, ['c']);
     assert.equal(panel.children.filter(e => e.className === 'pub')[1].children[3].textContent, 'Score EMM: 0.7');
     respuesta.publicaciones_descartadas = [{ titulo: 'Solo territorio', score_emm: 0.3, evaluacion_contextual: { justificacion: 'Falta entidad y contexto.' } }];
     await elementos.form.events.submit({ preventDefault() {} });
     const auditoria = panel.children.find(e => e.children[0]?.textContent === 'Auditar publicaciones descartadas');
     assert.ok(auditoria.children.some(e => e.textContent.includes('Score EMM: 0.3 — Solo territorio')));
-    elementos['territorios-genericos'].events.input();
-    assert.equal(boton.disabled, true);
+    respuesta.politica_emm = { umbral_aceptacion: 0.8 };
+    await elementos.form.events.submit({ preventDefault() {} });
+    assert.deepEqual(panel.children.filter(e => e.className === 'pub').map(e => e.children[0].textContent), ['Alta']);
     elementos.marco.events.input();
     assert.equal(boton.disabled, true);
     assert.equal(panel.children.length, 0);

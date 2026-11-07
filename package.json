@@ -1,0 +1,7 @@
+{
+  "name": "lab-emm",
+  "private": true,
+  "scripts": {
+    "test": "node tests/test_busqueda.cjs"
+  }
+}

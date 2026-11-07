@@ -1,9 +1,8 @@
-"""Construcción booleana agnóstica: alternativas OR, dimensiones AND."""
-from app.laboratorio.motor_v2.contratos import Marco
+"""Consultas derivadas del Marco, sin mezclar contextos mediante OR implícito."""
+from app.laboratorio.motor_v2.contratos import Marco, alternativas_contexto
 
 
 def _literal(valor, *, comillas=False):
-    # Las comillas del usuario no pueden cerrar las de la expresión generada.
     valor = ' '.join(valor.replace('"', ' ').replace('\\', ' ').split())
     if not valor:
         raise ValueError('Una alternativa del Marco quedó vacía')
@@ -12,29 +11,24 @@ def _literal(valor, *, comillas=False):
     return valor
 
 
-def construir_consulta(marco):
-    if isinstance(marco, str):
-        marco = Marco.desde_input(marco)
-    grupos = []
-    for valores, comillas in ((marco.entidades, False), (marco.contextos, False), (marco.territorios, True)):
-        if not valores:
-            raise ValueError('Las tres dimensiones del Marco son obligatorias')
-        grupos.append('(' + ' OR '.join(_literal(v, comillas=comillas) for v in valores) + ')')
-    return ' AND '.join(grupos)
-
-
 def planificar_consultas(marco):
-    """Etapas equilibradas: contexto, territorio y exploración para cada entidad."""
     if isinstance(marco, str):
         marco = Marco.desde_input(marco)
-    contextos = '(' + ' OR '.join(_literal(v) for v in marco.contextos) + ')'
-    territorios = '(' + ' OR '.join(_literal(v) for v in marco.territorios) + ')'
     salida, vistos = [], set()
-    for etapa, grupo in (('contexto', contextos), ('territorio', territorios), ('exploracion', None)):
+    def agregar(tipo, consulta):
+        if consulta not in vistos:
+            salida.append((tipo, consulta))
+            vistos.add(consulta)
+    for contexto in marco.contextos:
+        alternativas = alternativas_contexto(contexto)
+        grupo = ' OR '.join(_literal(v) for v in alternativas)
+        if len(alternativas) > 1:
+            grupo = '(' + grupo + ')'
         for entidad in marco.entidades:
-            base = _literal(entidad, comillas=True)
-            consulta = f'{base} AND {grupo}' if grupo else base
-            if consulta not in vistos:
-                salida.append((etapa, consulta))
-                vistos.add(consulta)
+            agregar('contexto', f'{_literal(entidad, comillas=True)} AND {grupo}')
+    territorios = '(' + ' OR '.join(_literal(v) for v in marco.territorios) + ')'
+    for entidad in marco.entidades:
+        agregar('territorio', f'{_literal(entidad, comillas=True)} AND {territorios}')
+    for entidad in marco.entidades:
+        agregar('exploracion', _literal(entidad, comillas=True))
     return salida

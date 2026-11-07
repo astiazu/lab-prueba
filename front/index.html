@@ -18,11 +18,9 @@
     
     <form id="form">
         <label>Marco de Búsqueda (ENTIDAD ; CONTEXTO ; TERRITORIO):</label><br>
-        <textarea id="marco" placeholder="Ej: Juan Zamora; candidato a Intendente, músico; Mina Clavero, Córdoba"></textarea>
+        <textarea id="marco" placeholder="Entidad; Contexto; Territorio local, Territorio regional, Territorio amplio"></textarea>
         
-        <label for="territorios-genericos">Territorios genéricos (opcional, separados por comas):</label>
-        <input type="text" id="territorios-genericos" aria-describedby="ayuda-territorios">
-        <p id="ayuda-territorios">Indica solo alternativas del territorio del Marco. Las demás serán específicas; si aparece una, también se inferirán estos territorios generales.</p>
+        <p>Ordena los territorios del más específico al más amplio. Cada contexto separado por coma se busca por separado; usa OR solo para declarar una disyunción explícita.</p>
         <label>Desde: <input type="date" id="desde" value="2024-01-01"></label>
         <label>Hasta: <input type="date" id="hasta" value="2025-12-31"></label>
         

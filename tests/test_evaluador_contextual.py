@@ -1,113 +1,71 @@
 import unittest
+from dataclasses import replace
 from app.laboratorio.motor_v2.contratos import Marco
 from app.laboratorio.motor_v2.evaluador_contextual import evaluar_publicacion
+from app.laboratorio.motor_v2.politica_emm import PoliticaEMM, SCORE_MAX_SIN_ENTIDAD
 
 
 class EvaluadorTests(unittest.TestCase):
-    def test_new_score_matrix(self):
-        marco = 'Entidad Alfa; Contexto Beta; Territorio Gamma'
-        casos = [('', 0.0), ('Contexto Beta', 0.3), ('Territorio Gamma', 0.3), ('Contexto Beta Territorio Gamma', 0.6),
-                 ('Entidad Alfa', 0.4), ('Entidad Alfa Contexto Beta', 0.7),
-                 ('Entidad Alfa Territorio Gamma', 0.7),
-                 ('Entidad Alfa Contexto Beta Territorio Gamma', 1.0),
-                 ('Entidad Alfa Entidad Alfa Contexto Beta Territorio Gamma', 1.0)]
-        for texto, esperado in casos:
-            with self.subTest(texto=texto):
-                resultado = evaluar_publicacion(marco, {'cuerpo_extraido': texto})
-                self.assertEqual(resultado['score_emm'], esperado)
-                self.assertEqual(resultado['penalizaciones'], [])
+    def test_three_identity_confusions_in_different_contexts_are_capped(self):
+        for contexto, otra in [('Actividad Alfa', 'Identidad Beta'), ('Actividad Beta', 'Identidad Gamma'), ('Actividad Gamma', 'Identidad Delta')]:
+            resultado = evaluar_publicacion(f'Identidad Alfa; {contexto}; Zona', {'titulo': otra, 'descripcion': f'{contexto} Zona'})
+            self.assertFalse(resultado['entidad_principal_presente'])
+            self.assertLess(abs(resultado['score_emm'] - SCORE_MAX_SIN_ENTIDAD), 1e-9)
+            self.assertEqual(resultado['motivo_descarte'], 'sin_entidad_principal')
+        politica = replace(PoliticaEMM(), score_max_sin_entidad=0.25)
+        resultado = evaluar_publicacion('Elemento; Proceso; Zona', {'descripcion': 'Proceso Zona'}, politica)
+        self.assertLess(abs(resultado['score_emm'] - politica.score_max_sin_entidad), 1e-9)
 
-    def test_all_sources_contribute_to_supertext(self):
-        marco = 'Proyecto Alfa; Diseño modular; Zona Norte'
-        resultado = evaluar_publicacion(marco, {
-            'titulo': 'Una nota', 'descripcion': 'Zona Norte', 'cuerpo_extraido': 'Información adicional',
-            'metadatos_youtube': {'titulo': 'Proyecto Alfa', 'descripcion': 'Diseño modular'}})
-        self.assertEqual(resultado['score_emm'], 1.0)
+    def test_penalty_keys_preserve_ascii_contract(self):
+        resultado = evaluar_publicacion('Elemento; Proceso; Zona', {'titulo': 'Proceso Zona'})
+        self.assertTrue(resultado['penalizaciones'])
+        for penalizacion in resultado['penalizaciones']:
+            self.assertIn('codigo', penalizacion)
+            self.assertNotIn('código', penalizacion)
+
+    def test_document_order_does_not_control_best_territory_and_no_sum(self):
+        marco = 'Elemento; Proceso; Sector Local, Área, Región, Zona Amplia'
+        doc = {'titulo': 'Elemento', 'descripcion': 'Zona Amplia, Región, Sector Local, Proceso'}
+        resultado = evaluar_publicacion(marco, doc)
+        self.assertEqual(resultado['detalles']['territorios']['mejor_match'], 'Sector Local')
+        self.assertLess(abs(resultado['componentes_score']['territorio'] - PoliticaEMM().peso_territorio), 1e-9)
+        self.assertLess(abs(resultado['score_emm'] - 1.0), 1e-9)
+        simple = evaluar_publicacion(marco, {'descripcion': 'Elemento Proceso Sector Local'})
+        self.assertLess(abs(simple['score_emm'] - resultado['score_emm']), 1e-9)
+
+    def test_marginal_without_territory_is_supported(self):
+        resultado = evaluar_publicacion('Elemento; Proceso; Zona', {'descripcion': 'Elemento Proceso'})
+        self.assertLess(abs(resultado['score_emm'] - 0.7), 1e-9)
+        self.assertIsNone(resultado['motivo_descarte'])
+
+    def test_supertext_sources_and_no_title_requirement(self):
+        resultado = evaluar_publicacion('Elemento; Proceso; Zona', {'titulo': 'Otra nota', 'descripcion': 'Zona',
+            'cuerpo_extraido': 'Contenido', 'metadatos_youtube': {'titulo': 'Elemento', 'descripcion': 'Proceso'}})
+        self.assertLess(abs(resultado['score_emm'] - 1.0), 1e-9)
         self.assertEqual(resultado['ubicacion_entidad'], 'METADATOS_YOUTUBE_TITULO')
-        self.assertEqual(set(resultado['fuentes_texto_evaluadas']), {'TITULO', 'DESCRIPCION', 'CUERPO_EXTRAIDO', 'YOUTUBE_TITULO', 'YOUTUBE_DESCRIPCION'})
 
-    def test_description_is_evaluated_without_fallback(self):
-        resultado = evaluar_publicacion('Proyecto Alfa; Diseño; Zona Norte', {'descripcion': 'Proyecto Alfa Diseño Zona Norte'})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['ubicacion_entidad'], 'DESCRIPCION')
+    def test_categorical_rejection_reasons(self):
+        marco = 'Elemento; Proceso; Sector, Región'
+        casos = [({'titulo': 'Proceso Sector'}, PoliticaEMM(), 'sin_entidad_principal'),
+                 ({'titulo': 'Elemento'}, PoliticaEMM(), 'entidad_homonima'),
+                 ({'titulo': 'Elemento Proceso'}, replace(PoliticaEMM(), umbral_aceptacion=0.8), 'territorio_incorrecto'),
+                 ({'titulo': 'Elemento Proceso Región'}, replace(PoliticaEMM(), umbral_aceptacion=0.9, umbral_real=0.9), 'score_bajo')]
+        for publicacion, politica, motivo in casos:
+            self.assertEqual(evaluar_publicacion(marco, publicacion, politica)['motivo_descarte'], motivo)
 
-    def test_no_title_or_first_500_penalty(self):
-        resultado = evaluar_publicacion('Proyecto Alfa; Diseño; Zona Norte', {
-            'titulo': 'Una nota real', 'cuerpo_extraido': 'x' * 600 + ' Proyecto Alfa Diseño Zona Norte'})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['penalizaciones'], [])
+    def test_no_identity_created_from_field_boundary_or_other_alternative(self):
+        marco = 'Entidad Alfa, Producto; Proceso; Zona'
+        for doc in ({'titulo': 'Entidad', 'descripcion': 'Alfa Proceso Zona'}, {'titulo': 'Producto Proceso Zona'}):
+            resultado = evaluar_publicacion(marco, doc)
+            self.assertFalse(resultado['entidad_principal_presente'])
+            self.assertLessEqual(resultado['score_emm'], SCORE_MAX_SIN_ENTIDAD)
 
-    def test_any_entity_contributes_without_mandatory_primary(self):
-        marco = 'Proyecto Alfa, Producto; Diseño; Zona Norte'
-        for texto, esperado in [('Proyecto Beta Diseño Zona Norte', 0.6),
-                                ('Producto Diseño Zona Norte', 1.0), ('Alfa Diseño Zona Norte', 0.6)]:
-            with self.subTest(texto=texto):
-                self.assertEqual(evaluar_publicacion(marco, {'cuerpo_extraido': texto})['score_emm'], esperado)
-        resultado = evaluar_publicacion(marco, {'titulo': 'Producto', 'descripcion': 'Diseño Zona Norte'})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertFalse(resultado['entidad_principal_presente'])
-        self.assertEqual(resultado['match_entidad'], ['Producto'])
+    def test_explicit_context_disjunction(self):
+        resultado = evaluar_publicacion('Elemento; Proceso OR Diseño; Zona', {'titulo': 'Elemento Diseño Zona'})
+        self.assertLess(abs(resultado['score_emm'] - 1.0), 1e-9)
+        self.assertEqual(resultado['detalles']['contextos']['evidencia'][0]['alternativas_encontradas'], ['Diseño'])
 
-    def test_alternative_context_or_territory_is_enough_for_cooccurrence(self):
-        resultado = evaluar_publicacion('Proyecto Alfa; Diseño, Investigación; Zona Norte, Zona Sur', {'titulo': 'Proyecto Alfa', 'descripcion': 'Investigación Zona Sur'})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['match_contexto'], ['Investigación'])
-        self.assertEqual(resultado['match_territorio'], ['Zona Sur'])
-        self.assertTrue(resultado['coocurrencia'])
-
-    def test_specific_territory_implies_declared_general_territory(self):
-        marco = Marco.desde_input('Proyecto Alfa; Diseño; Localidad, Región Amplia', territorios_genericos=['REGIÓN AMPLIA'])
-        resultado = evaluar_publicacion(marco, {'titulo': 'Proyecto Alfa', 'descripcion': 'Diseño Localidad'})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['componentes_score']['territorio'], 0.3)
-        self.assertEqual(resultado['match_territorio'], ['Localidad', 'Región Amplia'])
-        detalle = resultado['detalles']['territorios']
-        self.assertEqual(detalle['encontrados_textuales'], ['Localidad'])
-        self.assertEqual(detalle['inferidos'], ['Región Amplia'])
-        self.assertEqual(detalle['evidencia'][1]['metodo'], 'inferencia_por_territorio_especifico')
-        self.assertEqual(detalle['evidencia'][1]['menciones'], 0)
-        self.assertIn('región', detalle['palabras_no_encontradas'])
-        solo_general = evaluar_publicacion(marco, {'titulo': 'Proyecto Alfa', 'descripcion': 'Diseño Región Amplia'})
-        self.assertEqual(solo_general['score_emm'], 1.0)
-        self.assertEqual(solo_general['detalles']['territorios']['inferidos'], [])
-
-    def test_no_generic_inference_without_configuration(self):
-        resultado = evaluar_publicacion('Proyecto Alfa; Diseño; Localidad, Región Amplia', {'titulo': 'Proyecto Alfa', 'descripcion': 'Diseño Región Amplia'})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['detalles']['territorios']['genericos'], [])
-
-    def test_copied_descriptions_do_not_inflate_density(self):
-        texto = 'Proyecto Alfa Diseño Zona Norte'
-        resultado = evaluar_publicacion('Proyecto Alfa; Diseño; Zona Norte', {
-            'descripcion': texto, 'cuerpo_extraido': texto, 'metadatos_youtube': {'descripcion': texto}})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['detalles']['entidades']['menciones_principal'], 1)
-
-    def test_invalid_metadata_and_generic_configuration(self):
-        self.assertEqual(evaluar_publicacion('Elemento; Proceso; Zona', {'metadatos_youtube': None, 'descripcion': 3})['score_emm'], 0.0)
-        for genericos in ('Zona', ['No pertenece'], [3]):
-            with self.subTest(genericos=genericos), self.assertRaises(ValueError):
-                Marco.desde_input('Elemento; Proceso; Zona', territorios_genericos=genericos)
-
-    def test_location_keeps_snippet_provenance(self):
-        resultado = evaluar_publicacion('Proyecto Alfa; Diseño; Zona', {'descripcion': 'Proyecto Alfa Diseño Zona',
-            'cuerpo_extraido': 'Proyecto Alfa Diseño Zona', 'recuperacion': {'fuente_texto': 'DESCRIPCION_BRAVE'}})
-        self.assertEqual(resultado['ubicacion_entidad'], 'DESCRIPCION')
-        self.assertNotIn('CUERPO', resultado['ubicaciones_entidad'])
-
-    def test_alternatives_and_repetitions_do_not_add_points_per_word(self):
-        resultado = evaluar_publicacion('Elemento, Producto; Proceso, Diseño; Zona, Región', {
-            'titulo': 'Elemento Producto', 'descripcion': 'Proceso Diseño Zona Región',
-            'cuerpo_extraido': 'Elemento Producto Elemento Producto Proceso Diseño Zona Región'})
-        self.assertEqual(resultado['score_emm'], 1.0)
-        self.assertEqual(resultado['componentes_score'], {'entidad': 0.4, 'contexto': 0.3, 'territorio': 0.3})
-        self.assertEqual(evaluar_publicacion('Elemento; Proceso; Zona', {'titulo': 'Elemento Elemento', 'cuerpo_extraido': 'Elemento'})['score_emm'], 0.4)
-
-    def test_inference_is_not_reversed_or_applied_outside_marco(self):
-        marco = Marco.desde_input('Elemento; Proceso; Localidad, Región Amplia, País', territorios_genericos=['Región Amplia', 'País'])
-        resultado = evaluar_publicacion(marco, {'descripcion': 'Localidad'})
-        self.assertEqual(resultado['score_emm'], 0.3)
-        self.assertEqual(resultado['detalles']['territorios']['inferidos'], ['Región Amplia', 'País'])
-        inverso = evaluar_publicacion(marco, {'descripcion': 'País'})
-        self.assertEqual(inverso['match_territorio'], ['País'])
-        self.assertEqual(inverso['detalles']['territorios']['inferidos'], [])
+    def test_textual_territory_matches_are_not_inferred(self):
+        resultado = evaluar_publicacion('Elemento; Proceso; Sector, Región', {'titulo': 'Elemento Proceso Sector'})
+        self.assertEqual(resultado['match_territorio'], ['Sector'])
+        self.assertEqual(resultado['detalles']['territorios']['no_encontrados'], ['Región'])

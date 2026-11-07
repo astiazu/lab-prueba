@@ -103,7 +103,7 @@ class RecuperacionTests(unittest.TestCase):
             return {'web': {'results': [{'url': f'https://example.org/{i}', 'title': 'Entidad', 'description': 'Contexto Territorio'} for i in range(103)]}}
         def falla(url):
             raise recuperacion.ErrorRecuperacion('error_http', 'HTTP 403')
-        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'), self.assertLogs(motor.__name__, level='INFO') as logs:
+        with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'), self.assertLogs('app.laboratorio.motor_v2.acumulativo', level='INFO') as logs:
             resultado = motor.ejecutar_busqueda(payload, brave_consultar=proveedor, documental_obtener_html=falla)
         self.assertEqual(resultado['recuperacion_documental']['solicitudes_intentadas'], 103)
         self.assertEqual(len(resultado['publicaciones']), 103)
@@ -125,11 +125,11 @@ class RecuperacionTests(unittest.TestCase):
             raise recuperacion.ErrorRecuperacion('error_red', 'No disponible')
         with tempfile.TemporaryDirectory() as temporal, patch.object(motor, 'DESTINO', Path(temporal) / 'datos' / 'ejecuciones' / 'brave'):
             resultado = motor.ejecutar_busqueda(payload, brave_consultar=proveedor, documental_obtener_html=obtener)
-        self.assertEqual(resultado['total_urls_unicas'], 3)
+        self.assertEqual(resultado['total_urls_descubiertas'], 3)
         self.assertEqual(len(resultado['publicaciones']), 1)
         self.assertEqual(resultado['publicaciones'][0]['score_emm'], 1.0)
-        self.assertEqual([p['evaluacion_contextual']['score_emm'] for p in resultado['publicaciones_descartadas']], [0.0, 0.0])
-        self.assertEqual(resultado['publicaciones_descartadas'][1]['recuperacion']['estado'], 'ERROR')
+        self.assertEqual([p['evaluacion_contextual']['score_emm'] for p in resultado['publicaciones_archivadas']], [0.0, 0.0])
+        self.assertEqual(resultado['publicaciones_archivadas'][1]['recuperacion']['estado'], 'ERROR')
         self.assertEqual(resultado['recuperacion_documental']['documentos_con_texto'], 2)
         self.assertEqual(resultado['errores'][0]['proveedor'], 'RECUPERACION_DOCUMENTAL')
 

@@ -3,7 +3,6 @@
 (() => {
     const form = document.getElementById("form");
     const marco = document.getElementById("marco");
-    const genericos = document.getElementById("territorios-genericos");
     const desde = document.getElementById("desde");
     const hasta = document.getElementById("hasta");
     const estado = document.getElementById("estado-consulta");
@@ -29,7 +28,7 @@
     observador.observe(estado, { childList: true, characterData: true, subtree: true });
     actualizarBoton();
 
-    for (const campo of [marco, desde, hasta, genericos].filter(Boolean)) {
+    for (const campo of [marco, desde, hasta]) {
         campo.addEventListener("input", () => {
             version += 1;
             estado.textContent = "Sin validar";
@@ -52,7 +51,11 @@
         texto(panel, "p", `Período: ${datos.periodo.desde} a ${datos.periodo.hasta}`);
         const kpis = document.createElement("div");
         kpis.className = "kpis";
-        texto(kpis, "article", `URLs únicas: ${datos.total_urls_unicas}`);
+        texto(kpis, "article", `URLs activas: ${datos.total_urls_activas ?? datos.total_urls_unicas}`);
+        if (datos.aceptadas_reales != null) {
+            texto(kpis, "article", `Reales: ${datos.aceptadas_reales} · Marginales: ${datos.aceptadas_marginales}`);
+            texto(kpis, "article", `Archivadas: ${datos.total_urls_archivadas}`);
+        }
         texto(kpis, "article", `${datos.simulado ? "Operaciones exitosas (modo mixto/prueba)" : "Solicitudes exitosas"}: ${datos.solicitudes_exitosas}`);
         panel.append(kpis);
         const origenes = Array.isArray(datos.origenes)
@@ -62,13 +65,14 @@
         for (const aviso of [...datos.avisos, ...datos.errores]) {
             texto(panel, "p", typeof aviso === "string" ? aviso : `${aviso.proveedor || "Motor"}: ${aviso.error || JSON.stringify(aviso)}`);
         }
+        const umbral = datos.politica_emm?.umbral_aceptacion ?? 0.5;
         let descartadas = datos.total_publicaciones_descartadas ?? datos.publicaciones_descartadas?.length ?? 0;
         const scorePublicacion = p => p.score_emm ?? p.evaluacion_contextual?.score_emm ?? 0;
         const ordenadas = [...datos.publicaciones].sort((a, b) => scorePublicacion(b) - scorePublicacion(a));
         const descartadasDetalle = [...(datos.publicaciones_descartadas || [])];
         for (const publicacion of ordenadas) {
             const score = publicacion.score_emm ?? publicacion.evaluacion_contextual?.score_emm ?? 0;
-            if (typeof score !== "number" || !Number.isFinite(score) || score < 0.5) {
+            if (typeof score !== "number" || !Number.isFinite(score) || score < umbral) {
                 descartadas += 1;
                 descartadasDetalle.push(publicacion);
                 continue;
@@ -78,7 +82,7 @@
             texto(articulo, "h3", publicacion.titulo);
             texto(articulo, "p", `${publicacion.origen} · ${publicacion.fecha || publicacion.fecha_indice || publicacion.youtube?.publicado_en || "Fecha no disponible"}`);
             texto(articulo, "p", publicacion.resumen || publicacion.descripcion || "Sin descripción");
-            texto(articulo, "p", `Score EMM: ${score.toFixed(1)}`);
+            texto(articulo, "p", `Score EMM: ${score}`);
             if (publicacion.simulado ?? datos.simulado) {
                 texto(articulo, "p", "URL ficticia (sin navegación): " + publicacion.url);
                 panel.append(articulo);
@@ -107,7 +111,7 @@
             texto(detalleDescartes, "summary", "Auditar publicaciones descartadas");
             for (const publicacion of descartadasDetalle) {
                 const score = scorePublicacion(publicacion);
-                const valor = typeof score === "number" && Number.isFinite(score) ? score.toFixed(1) : "no disponible";
+                const valor = typeof score === "number" && Number.isFinite(score) ? score : "no disponible";
                 texto(detalleDescartes, "p", `Score EMM: ${valor} — ${publicacion.titulo || publicacion.url || "Sin título"}`);
                 if (publicacion.evaluacion_contextual?.justificacion) {
                     texto(detalleDescartes, "p", publicacion.evaluacion_contextual.justificacion);
@@ -115,6 +119,7 @@
             }
             panel.append(detalleDescartes);
         }
+        if (datos.total_urls_archivadas != null) texto(panel, "p", `${datos.total_urls_archivadas} publicaciones archivadas fuera del denominador.`);
         texto(panel, "small", `[${descartadas}] publicaciones descartadas por no cumplir el Marco EMM.`);
     }
 
@@ -132,7 +137,6 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     marco: marco.value.trim(),
-                    ...(genericos?.value.trim() ? { territorios_genericos: genericos.value.split(",").map(v => v.trim()).filter(Boolean) } : {}),
                     periodo: { desde: desde.value, hasta: hasta.value },
                 }),
             });
